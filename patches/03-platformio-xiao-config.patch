@@ -1,6 +1,6 @@
 --- a/variants/xiao_s3_wio/platformio.ini
 +++ b/variants/xiao_s3_wio/platformio.ini
-@@ -184,12 +184,58 @@
+@@ -184,13 +184,59 @@
  -;  -D MESH_DEBUG=1
  build_src_filter = ${Xiao_S3_WIO.build_src_filter}
 +  +<helpers/ui/SSD1306Display.cpp>
@@ -12,11 +12,10 @@
    ${Xiao_S3_WIO.lib_deps}
    densaugeo/base64 @ ~1.4.0
    adafruit/Adafruit SSD1306 @ ^2.5.13
-- 
-+
- [env:Xiao_S3_WIO_companion_radio_wifi]
- extends = Xiao_S3_WIO
- build_flags =
+ 
++[env:Xiao_S3_WIO_companion_radio_wifi]
++extends = Xiao_S3_WIO
++build_flags =
 +  ${Xiao_S3_WIO.build_flags}
 +  -I examples/companion_radio/ui-new
 +  -D MAX_CONTACTS=350
