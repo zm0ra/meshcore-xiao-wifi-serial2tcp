@@ -12,10 +12,11 @@
    ${Xiao_S3_WIO.lib_deps}
    densaugeo/base64 @ ~1.4.0
    adafruit/Adafruit SSD1306 @ ^2.5.13
+- 
 +
-+[env:Xiao_S3_WIO_companion_radio_wifi]
-+extends = Xiao_S3_WIO
-+build_flags =
+ [env:Xiao_S3_WIO_companion_radio_wifi]
+ extends = Xiao_S3_WIO
+ build_flags =
 +  ${Xiao_S3_WIO.build_flags}
 +  -I examples/companion_radio/ui-new
 +  -D MAX_CONTACTS=350
@@ -56,7 +57,5 @@
 +  file://arch/esp32/AsyncElegantOTA
 +  densaugeo/base64 @ ~1.4.0
 +  adafruit/Adafruit SSD1306 @ ^2.5.13
- 
  [env:Xiao_S3_WIO_sensor]
  extends = Xiao_S3_WIO
-
