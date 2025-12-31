@@ -1,0 +1,43 @@
+diff --git a/variants/xiao_s3_wio/platformio.ini b/variants/xiao_s3_wio/platformio.ini
+index 8979edc..85b086f 100644
+--- a/variants/xiao_s3_wio/platformio.ini
++++ b/variants/xiao_s3_wio/platformio.ini
+@@ -182,8 +182,36 @@ build_flags =
+   -D DISPLAY_CLASS=SSD1306Display
+   -D SERIAL_TX=D6
+   -D SERIAL_RX=D7
+-;  -D MESH_PACKET_LOGGING=1
+-;  -D MESH_DEBUG=1
++  -D MESH_PACKET_LOGGING=1
++  -D MESH_DEBUG=1
++build_src_filter = ${Xiao_S3_WIO.build_src_filter}
++  +<helpers/ui/SSD1306Display.cpp>
++  +<helpers/esp32/*.cpp>
++  +<helpers/ui/MomentaryButton.cpp>
++  +<../examples/companion_radio/*.cpp>
++  +<../examples/companion_radio/ui-new/*.cpp>
++lib_deps =
++  ${Xiao_S3_WIO.lib_deps}
++  densaugeo/base64 @ ~1.4.0
++  adafruit/Adafruit SSD1306 @ ^2.5.13
++
++[env:Xiao_S3_WIO_companion_radio_wifi]
++extends = Xiao_S3_WIO
++build_flags =
++  ${Xiao_S3_WIO.build_flags}
++  -I examples/companion_radio/ui-new
++  -D MAX_CONTACTS=350
++  -D MAX_GROUP_CHANNELS=40
++  -D DISPLAY_CLASS=SSD1306Display
++  -D WIFI_DEBUG_LOGGING=1
++  -D WIFI_SSID='"YourNetwork"'
++  -D WIFI_PWD='"YourPassword"'
++  -D LORA_FREQ=869.618
++  -D LORA_BW=62.5
++  -D LORA_SF=8
++  -D LORA_CR=5
++  -D MESH_PACKET_LOGGING=1
++  -D MESH_DEBUG=1
+ build_src_filter = ${Xiao_S3_WIO.build_src_filter}
+   +<helpers/ui/SSD1306Display.cpp>
+   +<helpers/esp32/*.cpp>

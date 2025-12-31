@@ -1,0 +1,8 @@
+build/
+build-new/
+# Sensitive configuration
+config.env
+
+# Build logs
+*.log
+test-*.log

@@ -1,0 +1,22 @@
+diff --git a/platformio.ini b/platformio.ini
+index 3907cf6..02bbb28 100644
+--- a/platformio.ini
++++ b/platformio.ini
+@@ -57,6 +57,8 @@ extends = arduino_base
+ platform = platformio/espressif32@6.11.0
+ monitor_filters = esp32_exception_decoder
+ extra_scripts = merge-bin.py
++upload_speed = 115200
++upload_port_timeout = 30
+ build_flags = ${arduino_base.build_flags}
+ ;  -D ESP32_CPU_FREQ=80          ; change it to your need
+ build_src_filter = ${arduino_base.build_src_filter}
+@@ -93,7 +95,7 @@ lib_deps =
+ extends = arduino_base
+ upload_protocol = picotool
+ board_build.core = earlephilhower
+-platform = https://github.com/maxgerhardt/platform-raspberrypi.git
++; platform = https://github.com/maxgerhardt/platform-raspberrypi.git
+ build_flags = ${arduino_base.build_flags}
+   -D RP2040_PLATFORM
+ 
