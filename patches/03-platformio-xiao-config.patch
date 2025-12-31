@@ -1,28 +1,215 @@
+diff --git a/variants/xiao_s3_wio/platformio.ini b/variants/xiao_s3_wio/platformio.ini
+index 8979edc..f20b842 100644
 --- a/variants/xiao_s3_wio/platformio.ini
 +++ b/variants/xiao_s3_wio/platformio.ini
-@@ -184,13 +184,53 @@
-   -D SERIAL_RX=D7
+@@ -1,189 +1,94 @@
+-[Xiao_S3_WIO]
+-extends = esp32_base
+-board = seeed_xiao_esp32s3
+-board_check = true
+-board_build.mcu = esp32s3
+-build_flags = ${esp32_base.build_flags}
+-  ${sensor_base.build_flags}
+-  -I variants/xiao_s3_wio
+-  -UENV_INCLUDE_GPS
+-  -D SEEED_XIAO_S3
+-  -D P_LORA_DIO_1=39
+-  -D P_LORA_NSS=41
+-  -D P_LORA_RESET=42   ; RADIOLIB_NC
+-  -D P_LORA_BUSY=40   ;  DIO2 = 38
+-  -D P_LORA_SCLK=7
+-  -D P_LORA_MISO=8
+-  -D P_LORA_MOSI=9
+-  -D PIN_USER_BTN=21
+-  -D PIN_STATUS_LED=48
+-  -D PIN_BOARD_SDA=D4
+-  -D PIN_BOARD_SCL=D5
+-  -D SX126X_RXEN=38
+-  -D SX126X_TXEN=RADIOLIB_NC
+-  -D SX126X_DIO2_AS_RF_SWITCH=true
+-  -D SX126X_DIO3_TCXO_VOLTAGE=1.8
+-  -D SX126X_CURRENT_LIMIT=140
+-  -D RADIO_CLASS=CustomSX1262
+-  -D WRAPPER_CLASS=CustomSX1262Wrapper
+-  -D LORA_TX_POWER=22
+-  -D SX126X_RX_BOOSTED_GAIN=1
+-build_src_filter = ${esp32_base.build_src_filter}
+-  +<../variants/xiao_s3_wio>
+-  +<helpers/sensors>
+-lib_deps =
+-  ${esp32_base.lib_deps}
+-  ${sensor_base.lib_deps}
+-
+-[env:Xiao_S3_WIO_repeater]
+-extends = Xiao_S3_WIO
+-build_src_filter = ${Xiao_S3_WIO.build_src_filter}
+-  +<../examples/simple_repeater/*.cpp>
+-build_flags =
+-  ${Xiao_S3_WIO.build_flags}
+-  -D ADVERT_NAME='"XiaoS3 Repeater"'
+-  -D ADVERT_LAT=0.0
+-  -D ADVERT_LON=0.0
+-  -D ADMIN_PASSWORD='"password"'
+-  -D MAX_NEIGHBOURS=50
+-;  -D MESH_PACKET_LOGGING=1
+-;  -D MESH_DEBUG=1
+-lib_deps =
+-  ${Xiao_S3_WIO.lib_deps}
+-  ${esp32_ota.lib_deps}
+-
+-; [env:Xiao_S3_WIO_repeater_bridge_rs232]
+-; extends = Xiao_S3_WIO
+-; build_src_filter = ${Xiao_S3_WIO.build_src_filter}
+-;   +<helpers/bridges/RS232Bridge.cpp>
+-;   +<../examples/simple_repeater/*.cpp>
+-; build_flags =
+-;   ${Xiao_S3_WIO.build_flags}
+-;   -D ADVERT_NAME='"RS232 Bridge"'
+-;   -D ADVERT_LAT=0.0
+-;   -D ADVERT_LON=0.0
+-;   -D ADMIN_PASSWORD='"password"'
+-;   -D MAX_NEIGHBOURS=50
+-;   -D WITH_RS232_BRIDGE=Serial2
+-; RS232 bridge Pins have been relocated from 5,6 which is the i2c bus on xiao_s3
+-;   -D WITH_RS232_BRIDGE_RX=3
+-;   -D WITH_RS232_BRIDGE_TX=4
+-;  -D BRIDGE_DEBUG=1
+-; ;  -D MESH_PACKET_LOGGING=1
+-; ;  -D MESH_DEBUG=1
+-; lib_deps =
+-;   ${Xiao_S3_WIO.lib_deps}
+-;   ${esp32_ota.lib_deps}
++[env]
++extends = base
+ 
+-[env:Xiao_S3_WIO_repeater_bridge_espnow]
+-extends = Xiao_S3_WIO
+-build_src_filter = ${Xiao_S3_WIO.build_src_filter}
+-  +<helpers/bridges/ESPNowBridge.cpp>
+-  +<../examples/simple_repeater/*.cpp>
+-build_flags =
+-  ${Xiao_S3_WIO.build_flags}
+-  -D ADVERT_NAME='"ESPNow Bridge"'
+-  -D ADVERT_LAT=0.0
+-  -D ADVERT_LON=0.0
+-  -D ADMIN_PASSWORD='"password"'
+-  -D MAX_NEIGHBOURS=50
+-  -D WITH_ESPNOW_BRIDGE=1
+-;  -D BRIDGE_DEBUG=1
+-;  -D MESH_PACKET_LOGGING=1
+-;  -D MESH_DEBUG=1
++[base]
++platform = platformio/espressif32@6.11.0
++board = seeed_xiao_esp32s3
++framework = arduino
++monitor_port = /dev/cu.usbmodem*
++monitor_speed = 115200
++lib_ldf_mode = chain+
+ lib_deps =
+-  ${Xiao_S3_WIO.lib_deps}
+-  ${esp32_ota.lib_deps}
+-
+-[env:Xiao_S3_WIO_room_server]
+-extends = Xiao_S3_WIO
+-build_src_filter = ${Xiao_S3_WIO.build_src_filter}
+-  +<../examples/simple_room_server>
++    jgromes/RadioLib@^7.3.0
++    rweather/Crypto@^0.4.0
++    adafruit/RTClib@^2.1.3
++    melopero/Melopero RV3028@^1.1.0
++    electroniccats/CayenneLPP@1.6.1
++    bblanchon/ArduinoJson@*
++    adafruit/Adafruit INA3221 Library@^1.0.1
++    adafruit/Adafruit INA219@^1.2.3
++    adafruit/Adafruit NeoPixel@*
++    adafruit/Adafruit GFX Library@*
++    adafruit/Adafruit SSD1306@*
++    robtillaart/INA226@^0.6.4
++    adafruit/Adafruit INA260 Library@^1.5.3
++    adafruit/Adafruit AHTX0@^2.0.5
++    adafruit/Adafruit BME280 Library@^2.3.0
++    adafruit/Adafruit SH110X@*
+ build_flags =
+-  ${Xiao_S3_WIO.build_flags}
+-  -D ADVERT_NAME='"XiaoS3 Room"'
+-  -D ADVERT_LAT=0.0
+-  -D ADVERT_LON=0.0
+-  -D ADMIN_PASSWORD='"password"'
+-  -D ROOM_PASSWORD='"hello"'
+-;  -D MESH_PACKET_LOGGING=1
+-;  -D MESH_DEBUG=1
+-lib_deps =
+-  ${Xiao_S3_WIO.lib_deps}
+-  ${esp32_ota.lib_deps}
++    -std=gnu++17
++    -O2
++    -Wl,--wrap=malloc
++    -Wl,--wrap=free
++    -Wl,--wrap=calloc
++    -Wl,--wrap=realloc
++monitor_filters = esp32_exception_decoder, default, log2file
++build_partitions = partition-table.csv
+ 
+-[env:Xiao_S3_WIO_terminal_chat]
+-extends = Xiao_S3_WIO
++[env:Xiao_S3_WIO]
++extends = base
+ build_flags =
+-  ${Xiao_S3_WIO.build_flags}
+-  -D MAX_CONTACTS=350
+-  -D MAX_GROUP_CHANNELS=40
+-;  -D MESH_PACKET_LOGGING=1
+-;  -D MESH_DEBUG=1
+-build_src_filter = ${Xiao_S3_WIO.build_src_filter}
+-  +<../examples/simple_secure_chat/main.cpp>
+-lib_deps =
+-  ${Xiao_S3_WIO.lib_deps}
+-  densaugeo/base64 @ ~1.4.0
+-
+-[env:Xiao_S3_WIO_companion_radio_usb]
+-extends = Xiao_S3_WIO
+-build_flags =
+-  ${Xiao_S3_WIO.build_flags}
+-  -I examples/companion_radio/ui-new
+-  -D MAX_CONTACTS=350
+-  -D MAX_GROUP_CHANNELS=40
+-  -D DISPLAY_CLASS=SSD1306Display
+-  -D OFFLINE_QUEUE_SIZE=256
++  ${base.build_flags}
++  -D BOARD_XIAO_S3_WIO
++  -D MESH_DEVICE_PROFILE=DEVICE_PROFILE_UNSET
++  -D MAX_NODES=200
++  -D MAX_MESH_CHANNELS=8
++  -I variants/xiao_s3_wio
++  -D SERIAL_TX=D6
++  -D SERIAL_RX=D7
  ;  -D MESH_PACKET_LOGGING=1
  ;  -D MESH_DEBUG=1
- build_src_filter = ${Xiao_S3_WIO.build_src_filter}
-+  +<helpers/ui/SSD1306Display.cpp>
-+  +<helpers/esp32/*.cpp>
-+  +<helpers/ui/MomentaryButton.cpp>
-+  +<../examples/companion_radio/*.cpp>
-+  +<../examples/companion_radio/ui-new/*.cpp>
+-build_src_filter = ${Xiao_S3_WIO.build_src_filter}
++build_src_filter = ${base.build_src_filter}
+   +<helpers/ui/SSD1306Display.cpp>
+   +<helpers/esp32/*.cpp>
+   +<helpers/ui/MomentaryButton.cpp>
+   +<../examples/companion_radio/*.cpp>
+   +<../examples/companion_radio/ui-new/*.cpp>
  lib_deps =
-    ${Xiao_S3_WIO.lib_deps}
-    densaugeo/base64 @ ~1.4.0
-    adafruit/Adafruit SSD1306 @ ^2.5.13
-+
+-  ${Xiao_S3_WIO.lib_deps}
+-  densaugeo/base64 @ ~1.4.0
+-  adafruit/Adafruit SSD1306 @ ^2.5.13
++    ${base.lib_deps}
++    densaugeo/base64@~1.4.0
++    adafruit/Adafruit SSD1306@^2.5.13
+ 
+-[env:Xiao_S3_WIO_companion_radio_ble]
 +[env:Xiao_S3_WIO_companion_radio_wifi]
-+extends = Xiao_S3_WIO
-+build_flags =
-+  ${Xiao_S3_WIO.build_flags}
-+  -I examples/companion_radio/ui-new
-+  -D MAX_CONTACTS=350
-+  -D MAX_GROUP_CHANNELS=40
-+  -D DISPLAY_CLASS=SSD1306Display
+ extends = Xiao_S3_WIO
+ build_flags =
+   ${Xiao_S3_WIO.build_flags}
+   -I examples/companion_radio/ui-new
+   -D MAX_CONTACTS=350
+   -D MAX_GROUP_CHANNELS=40
+-  -D BLE_PIN_CODE=123456
+   -D DISPLAY_CLASS=SSD1306Display
 +  -D WIFI_DEBUG_LOGGING=1
 +  -D WIFI_SSID='"YourNetwork"'
 +  -D WIFI_PWD='"YourPassword"'
@@ -33,7 +220,33 @@
 +  -D LORA_TX_POWER=22
 +  -D MESH_PACKET_LOGGING=1
 +  -D MESH_DEBUG=1
-+  -D OFFLINE_QUEUE_SIZE=256
+   -D OFFLINE_QUEUE_SIZE=256
+-;  -D BLE_DEBUG_LOGGING=1
+-;  -D MESH_PACKET_LOGGING=1
+-;  -D MESH_DEBUG=1
+-build_src_filter = ${Xiao_S3_WIO.build_src_filter}
+-  +<helpers/ui/SSD1306Display.cpp>
+-  +<helpers/esp32/*.cpp>
+-  +<helpers/ui/MomentaryButton.cpp>
+-  +<../examples/companion_radio/*.cpp>
+-  +<../examples/companion_radio/ui-new/*.cpp>
+-lib_deps =
+-  ${Xiao_S3_WIO.lib_deps}
+-  densaugeo/base64 @ ~1.4.0
+-  adafruit/Adafruit SSD1306 @ ^2.5.13
+-
+-[env:Xiao_S3_WIO_companion_radio_serial]
+-extends = Xiao_S3_WIO
+-build_flags =
+-  ${Xiao_S3_WIO.build_flags}
+-  -I examples/companion_radio/ui-new
+-  -D MAX_CONTACTS=350
+-  -D MAX_GROUP_CHANNELS=40
+-  -D DISPLAY_CLASS=SSD1306Display
+-  -D SERIAL_TX=D6
+-  -D SERIAL_RX=D7
+-;  -D MESH_PACKET_LOGGING=1
+-;  -D MESH_DEBUG=1
 +  -D MAX_UNREAD_MSGS=32
 +  -D MAX_BLOBRECS=100
 +  -D AUTO_OFF_MILLIS=15000
@@ -45,18 +258,35 @@
 +  -D ADVERT_LAT=0.0
 +  -D ADVERT_LON=0.0
 +  -D ADMIN_PASSWORD='"password"'
-+build_src_filter = ${Xiao_S3_WIO.build_src_filter}
-+  +<helpers/ui/SSD1306Display.cpp>
-+  +<helpers/esp32/*.cpp>
-+  +<helpers/ui/MomentaryButton.cpp>
-+  +<../examples/companion_radio/*.cpp>
-+  +<../examples/companion_radio/ui-new/*.cpp>
-+lib_deps =
-+  ${Xiao_S3_WIO.lib_deps}
-+  esphome/AsyncTCP-esphome @ ^2.1.3
-+  ottowinter/ESPAsyncWebServer-esphome @ ^3.1.0
+ build_src_filter = ${Xiao_S3_WIO.build_src_filter}
+   +<helpers/ui/SSD1306Display.cpp>
+   +<helpers/esp32/*.cpp>
+@@ -192,21 +97,16 @@ build_src_filter = ${Xiao_S3_WIO.build_src_filter}
+   +<../examples/companion_radio/ui-new/*.cpp>
+ lib_deps =
+   ${Xiao_S3_WIO.lib_deps}
+-  densaugeo/base64 @ ~1.4.0
+-  adafruit/Adafruit SSD1306 @ ^2.5.13
++  esphome/AsyncTCP-esphome@^2.1.3
++  ottowinter/ESPAsyncWebServer-esphome@^3.1.0
 +  file://arch/esp32/AsyncElegantOTA
-+  densaugeo/base64 @ ~1.4.0
-+  adafruit/Adafruit SSD1306 @ ^2.5.13
-    [env:Xiao_S3_WIO_sensor]
-    extends = Xiao_S3_WIO
++  densaugeo/base64@~1.4.0
++  adafruit/Adafruit SSD1306@^2.5.13
+ 
+ [env:Xiao_S3_WIO_sensor]
+ extends = Xiao_S3_WIO
+ build_src_filter = ${Xiao_S3_WIO.build_src_filter}
+-  +<../examples/simple_sensor>
+-build_flags =
+-  ${Xiao_S3_WIO.build_flags}
+-  -D ADVERT_NAME='"XiaoS3 sensor"'
+-  -D ADVERT_LAT=0.0
+-  -D ADVERT_LON=0.0
+-  -D ADMIN_PASSWORD='"password"'
+-;  -D MESH_PACKET_LOGGING=1
+-;  -D MESH_DEBUG=1
++  -<../examples/companion_radio>
+ lib_deps =
+   ${Xiao_S3_WIO.lib_deps}
+-  ${esp32_ota.lib_deps}
++  -<arch/esp32/AsyncElegantOTA>
