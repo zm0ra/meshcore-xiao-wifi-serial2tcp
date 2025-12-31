@@ -2,7 +2,7 @@ diff --git a/variants/xiao_s3_wio/platformio.ini b/variants/xiao_s3_wio/platform
 index 1a1b1b1..2c2c2c2 100644
 --- a/variants/xiao_s3_wio/platformio.ini
 +++ b/variants/xiao_s3_wio/platformio.ini
-@@ -182,8 +182,49 @@ build_flags =
+@@ -182,13 +182,54 @@ build_flags =
    -D DISPLAY_CLASS=SSD1306Display
    -D SERIAL_TX=D6
    -D SERIAL_RX=D7
@@ -11,11 +11,11 @@ index 1a1b1b1..2c2c2c2 100644
 +  -D MESH_PACKET_LOGGING=1
 +  -D MESH_DEBUG=1
  build_src_filter = ${Xiao_S3_WIO.build_src_filter}
-+  +<helpers/ui/SSD1306Display.cpp>
-+  +<helpers/esp32/*.cpp>
-+  +<helpers/ui/MomentaryButton.cpp>
-+  +<../examples/companion_radio/*.cpp>
-+  +<../examples/companion_radio/ui-new/*.cpp>
+   +<helpers/ui/SSD1306Display.cpp>
+   +<helpers/esp32/*.cpp>
+   +<helpers/ui/MomentaryButton.cpp>
+   +<../examples/companion_radio/*.cpp>
+   +<../examples/companion_radio/ui-new/*.cpp>
  lib_deps =
    ${Xiao_S3_WIO.lib_deps}
    densaugeo/base64 @ ~1.4.0
