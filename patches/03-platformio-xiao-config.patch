@@ -1,8 +1,8 @@
 diff --git a/variants/xiao_s3_wio/platformio.ini b/variants/xiao_s3_wio/platformio.ini
-index 8979edc..e00eddf 100644
+index 8979edc..25e7c3e 100644
 --- a/variants/xiao_s3_wio/platformio.ini
 +++ b/variants/xiao_s3_wio/platformio.ini
-@@ -210,3 +210,47 @@ build_flags =
+@@ -210,3 +210,46 @@ build_flags =
  lib_deps =
    ${Xiao_S3_WIO.lib_deps}
    ${esp32_ota.lib_deps}
@@ -32,7 +32,6 @@ index 8979edc..e00eddf 100644
 +  -D UI_RECENT_LIST_SIZE=4
 +  -D BRIDGE_DEBUG=0
 +  -D BLE_DEBUG_LOGGING=0
-
 +  -D ADVERT_NAME='"XiaoS3 WiFi"'
 +  -D ADVERT_LAT=0.0
 +  -D ADVERT_LON=0.0
@@ -46,7 +45,6 @@ index 8979edc..e00eddf 100644
 +lib_deps =
 +  ${Xiao_S3_WIO.lib_deps}
 +  esphome/AsyncTCP-esphome@^2.1.3
-+  ottowinter/ESPAsyncWebServer-esphome@^3.1.0
++  otterwinter/ESPAsyncWebServer-esphome@^3.1.0
 +  file://arch/esp32/AsyncElegantOTA
 +  densaugeo/base64 @ ~1.4.0
-+  adafruit/Adafruit SSD1306 @ ^2.5.13
