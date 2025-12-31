@@ -322,7 +322,7 @@ upload_firmware() {
     log_info "Uploading firmware to ${port}..."
     
     cd "$REPO_DIR"
-    pio run -e "$PIO_ENV" --target upload --upload-port "$port"
+    pio run -e "$PIO_ENV" -t upload --upload-port "$port"
     
     log_success "Firmware uploaded successfully"
 }
