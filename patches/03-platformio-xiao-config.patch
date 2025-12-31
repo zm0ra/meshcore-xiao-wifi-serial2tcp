@@ -1,6 +1,6 @@
 --- a/variants/xiao_s3_wio/platformio.ini
 +++ b/variants/xiao_s3_wio/platformio.ini
-@@ -184,6 +184,10 @@
+@@ -184,12 +184,58 @@
  -;  -D MESH_DEBUG=1
  build_src_filter = ${Xiao_S3_WIO.build_src_filter}
 +  +<helpers/ui/SSD1306Display.cpp>
@@ -11,9 +11,8 @@
  lib_deps =
    ${Xiao_S3_WIO.lib_deps}
    densaugeo/base64 @ ~1.4.0
-@@ -191,6 +195,52 @@
    adafruit/Adafruit SSD1306 @ ^2.5.13
- 
++
 +[env:Xiao_S3_WIO_companion_radio_wifi]
 +extends = Xiao_S3_WIO
 +build_flags =
@@ -57,6 +56,6 @@
 +  file://arch/esp32/AsyncElegantOTA
 +  densaugeo/base64 @ ~1.4.0
 +  adafruit/Adafruit SSD1306 @ ^2.5.13
-+
+ 
  [env:Xiao_S3_WIO_sensor]
  extends = Xiao_S3_WIO
