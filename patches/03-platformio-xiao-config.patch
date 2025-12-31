@@ -59,3 +59,4 @@
  
  [env:Xiao_S3_WIO_sensor]
  extends = Xiao_S3_WIO
+
