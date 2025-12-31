@@ -169,6 +169,28 @@ print_header() {
     echo -e "${NC}"
 }
 
+print_usage() {
+        cat << 'EOF'
+Usage: ./build_companion.sh --build [--upload] [OPTIONS]
+
+Steps:
+    --build        Clone/patch/configure (unless skipped) and build firmware
+    --upload       Upload previously built firmware (combine with --build to build+upload)
+
+Options:
+    --no-clone     Skip repository cloning (use existing checkout)
+    --no-patch     Skip applying patches
+    --monitor      Upload and start serial monitor
+    --build-only   Build without clone/patch/config steps
+    --help         Show this help
+
+Examples:
+    ./build_companion.sh --build
+    ./build_companion.sh --build --upload
+    ./build_companion.sh --upload          # requires existing firmware.bin
+EOF
+}
+
 check_dependencies() {
     log_info "Checking dependencies..."
     
@@ -370,15 +392,24 @@ main() {
     print_header
     
     # Parse arguments
-    DO_CLONE=1
-    DO_PATCH=1
-    DO_CONFIGURE=1
-    DO_BUILD=1
+    DO_CLONE=-1
+    DO_PATCH=-1
+    DO_CONFIGURE=-1
+    DO_BUILD=0
     DO_UPLOAD=0
     DO_MONITOR=0
     
+    if [[ $# -eq 0 ]]; then
+        print_usage
+        exit 1
+    fi
+    
     while [[ $# -gt 0 ]]; do
         case $1 in
+            --build)
+                DO_BUILD=1
+                shift
+                ;;
             --no-clone)
                 DO_CLONE=0
                 shift
@@ -397,22 +428,14 @@ main() {
                 shift
                 ;;
             --build-only)
+                DO_BUILD=1
                 DO_CLONE=0
                 DO_PATCH=0
                 DO_CONFIGURE=0
                 shift
                 ;;
             --help)
-                echo "Usage: $0 [OPTIONS]"
-                echo
-                echo "Options:"
-                echo "  --no-clone     Skip repository cloning"
-                echo "  --no-patch     Skip applying patches"
-                echo "  --upload       Upload firmware after build"
-                echo "  --monitor      Upload and start serial monitor"
-                echo "  --build-only   Only build (skip clone/patch/config)"
-                echo "  --help         Show this help"
-                echo
+                print_usage
                 exit 0
                 ;;
             *)
@@ -422,6 +445,30 @@ main() {
         esac
     done
     
+    if [ $DO_BUILD -eq 1 ]; then
+        [ $DO_CLONE -eq -1 ] && DO_CLONE=1
+        [ $DO_PATCH -eq -1 ] && DO_PATCH=1
+        [ $DO_CONFIGURE -eq -1 ] && DO_CONFIGURE=1
+    else
+        [ $DO_CLONE -eq -1 ] && DO_CLONE=0
+        [ $DO_PATCH -eq -1 ] && DO_PATCH=0
+        [ $DO_CONFIGURE -eq -1 ] && DO_CONFIGURE=0
+    fi
+
+    if [ $DO_UPLOAD -eq 1 ] && [ $DO_BUILD -eq 0 ]; then
+        local firmware_path="${REPO_DIR}/.pio/build/${PIO_ENV}/firmware.bin"
+        if [ -f "$firmware_path" ]; then
+            log_info "Upload requested and firmware exists -> skip clone/patch/build"
+            DO_CLONE=0
+            DO_PATCH=0
+            DO_CONFIGURE=0
+            DO_BUILD=0
+        else
+            log_error "Upload requested but firmware is missing. Run with --build first or combine --build --upload."
+            exit 1
+        fi
+    fi
+
     check_dependencies
     
     [ $DO_CLONE -eq 1 ] && clone_repository
