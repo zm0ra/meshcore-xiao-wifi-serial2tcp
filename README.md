@@ -25,6 +25,17 @@ Set your WiFi credentials (DHCP only):
 ```bash
 WIFI_SSID="YourNetwork"
 WIFI_PASSWORD="YourPassword"
+TCP_PORT=5002
+WIFI_DEBUG_LOGGING=1
+
+# LoRa radio
+LORA_FREQ=869.618
+LORA_BW=62.5
+LORA_SF=8
+LORA_CR=5
+LORA_TX_POWER=22
+
+# Other flags are listed below (memory/display/debug/identity)
 UPLOAD_PORT=""  # Leave empty for auto-detect
 ```
 
@@ -39,6 +50,26 @@ Edit `src/Identity.cpp` in the cloned repo after first build:
 ```
 
 Or modify patches to inject your preferred region/preset.
+
+### 2.1. Configurable Build Flags (config.env)
+
+| Area | Variable | Default | Notes |
+|------|----------|---------|-------|
+| WiFi | WIFI_SSID / WIFI_PASSWORD | YourNetwork / YourPassword | WiFi credentials |
+| WiFi | TCP_PORT | 5002 | TCP raw bridge port |
+| WiFi | WIFI_DEBUG_LOGGING | 1 | Enable WiFi debug on Serial |
+| LoRa | LORA_FREQ / LORA_BW / LORA_SF / LORA_CR | 869.618 / 62.5 / 8 / 5 | Radio preset |
+| LoRa | LORA_TX_POWER | 22 | TX power (dBm) |
+| Memory | MAX_CONTACTS / MAX_GROUP_CHANNELS | 350 / 40 | Limits |
+| Memory | OFFLINE_QUEUE_SIZE / MAX_UNREAD_MSGS / MAX_BLOBRECS | 256 / 32 / 100 | Queues/buffers |
+| Display | DISPLAY_CLASS | SSD1306Display | Display driver |
+| Display | AUTO_OFF_MILLIS | 15000 | Screen auto-off (ms) |
+| Display | UI_RECENT_LIST_SIZE | 4 | Recent items list |
+| Debug | MESH_PACKET_LOGGING / MESH_DEBUG | 1 / 1 | Mesh debug switches |
+| Debug | BRIDGE_DEBUG / BLE_DEBUG_LOGGING | 0 / 0 | Additional debug |
+| Identity | ADVERT_NAME | XiaoS3 WiFi | Mesh advert name |
+| Identity | ADVERT_LAT / ADVERT_LON | 0.0 / 0.0 | Coordinates |
+| Identity | ADMIN_PASSWORD | password | Admin password |
 
 ### 3. Build Firmware
 
@@ -120,14 +151,7 @@ Then enter raw packet hex:
 
 ## Configuration Reference
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| WIFI_SSID | WiFi network name | "YourNetwork" |
-| WIFI_PASSWORD | WiFi password | "your_password" |
-| TCP_PORT | Raw packet server port | 5002 |
-| UPLOAD_PORT | Serial port for upload | "/dev/cu.usbmodem1101" |
-| PIO_ENV | PlatformIO environment | "Xiao_S3_WIO_companion_radio_wifi" |
-| WORK_DIR | Optional custom build directory | "/path/to/workdir" |
+Pełna lista konfigurowalnych flag jest w tabeli „Configurable Build Flags (config.env)” powyżej.
 
 ## Troubleshooting
 

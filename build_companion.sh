@@ -24,12 +24,42 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo -e "${RED}[!] Configuration file not found: ${CONFIG_FILE}${NC}"
     echo -e "${YELLOW}[*] Creating default config.env...${NC}"
     cat > "$CONFIG_FILE" << 'EOF'
-# WiFi credentials
+# WiFi credentials (DHCP only)
 WIFI_SSID="YourNetwork"
 WIFI_PASSWORD="YourPassword"
-
-# TCP Port
 TCP_PORT=5002
+WIFI_DEBUG_LOGGING=1
+
+# LoRa radio flags
+LORA_FREQ=869.618
+LORA_BW=62.5
+LORA_SF=8
+LORA_CR=5
+LORA_TX_POWER=22
+
+# Memory / queues / contacts
+MAX_CONTACTS=350
+MAX_GROUP_CHANNELS=40
+OFFLINE_QUEUE_SIZE=256
+MAX_UNREAD_MSGS=32
+MAX_BLOBRECS=100
+
+# Display
+DISPLAY_CLASS=SSD1306Display
+AUTO_OFF_MILLIS=15000
+UI_RECENT_LIST_SIZE=4
+
+# Debug (0=off,1=on)
+MESH_PACKET_LOGGING=1
+MESH_DEBUG=1
+BRIDGE_DEBUG=0
+BLE_DEBUG_LOGGING=0
+
+# Identity / advertising
+ADVERT_NAME="XiaoS3 WiFi"
+ADVERT_LAT=0.0
+ADVERT_LON=0.0
+ADMIN_PASSWORD="password"
 
 # Upload port (leave empty to auto-detect)
 UPLOAD_PORT=""
@@ -38,7 +68,7 @@ UPLOAD_PORT=""
 PIO_ENV="Xiao_S3_WIO_companion_radio_wifi"
 
 # Git repository
-REPO_URL="https://github.com/meshcore-dev/MeshCore"
+REPO_URL="https://github.com/ripplebiz/MeshCore"
 REPO_BRANCH="main"
 
 # Optional: override build directory (default: ./build)
@@ -49,6 +79,38 @@ EOF
 fi
 
 source "$CONFIG_FILE"
+
+# Defaults for configurable build flags
+WIFI_SSID="${WIFI_SSID:-YourNetwork}"
+WIFI_PASSWORD="${WIFI_PASSWORD:-YourPassword}"
+TCP_PORT=${TCP_PORT:-5002}
+WIFI_DEBUG_LOGGING=${WIFI_DEBUG_LOGGING:-1}
+
+LORA_FREQ=${LORA_FREQ:-869.618}
+LORA_BW=${LORA_BW:-62.5}
+LORA_SF=${LORA_SF:-8}
+LORA_CR=${LORA_CR:-5}
+LORA_TX_POWER=${LORA_TX_POWER:-22}
+
+MAX_CONTACTS=${MAX_CONTACTS:-350}
+MAX_GROUP_CHANNELS=${MAX_GROUP_CHANNELS:-40}
+OFFLINE_QUEUE_SIZE=${OFFLINE_QUEUE_SIZE:-256}
+MAX_UNREAD_MSGS=${MAX_UNREAD_MSGS:-32}
+MAX_BLOBRECS=${MAX_BLOBRECS:-100}
+
+DISPLAY_CLASS="${DISPLAY_CLASS:-SSD1306Display}"
+AUTO_OFF_MILLIS=${AUTO_OFF_MILLIS:-15000}
+UI_RECENT_LIST_SIZE=${UI_RECENT_LIST_SIZE:-4}
+
+MESH_PACKET_LOGGING=${MESH_PACKET_LOGGING:-1}
+MESH_DEBUG=${MESH_DEBUG:-1}
+BRIDGE_DEBUG=${BRIDGE_DEBUG:-0}
+BLE_DEBUG_LOGGING=${BLE_DEBUG_LOGGING:-0}
+
+ADVERT_NAME="${ADVERT_NAME:-XiaoS3 WiFi}"
+ADVERT_LAT=${ADVERT_LAT:-0.0}
+ADVERT_LON=${ADVERT_LON:-0.0}
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-password}"
 
 # Allow overriding work directory via env or config
 WORK_DIR="${WORK_DIR:-$DEFAULT_WORK_DIR}"
@@ -173,8 +235,8 @@ apply_patches() {
     log_success "Patches applied"
 }
 
-configure_wifi() {
-    log_info "Configuring WiFi credentials (platformio.ini)..."
+configure_build_flags() {
+    log_info "Configuring build flags (platformio.ini)..."
 
     local config_file="${REPO_DIR}/variants/xiao_s3_wio/platformio.ini"
 
@@ -188,16 +250,50 @@ configure_wifi() {
         cp "$config_file" "${config_file}.orig"
     fi
 
-    # Replace WiFi SSID/PWD build flags
-    sed -i.bak "s/-D WIFI_SSID='\"[^\"]*\"'/-D WIFI_SSID='\"${WIFI_SSID}\"'/" "$config_file"
-    sed -i.bak "s/-D WIFI_PWD='\"[^\"]*\"'/-D WIFI_PWD='\"${WIFI_PASSWORD}\"'/" "$config_file"
+    # WiFi
+    sed -i.bak "s|-D WIFI_SSID='\"[^\"]*\"'|-D WIFI_SSID='\"${WIFI_SSID}\"'|" "$config_file"
+    sed -i.bak "s|-D WIFI_PWD='\"[^\"]*\"'|-D WIFI_PWD='\"${WIFI_PASSWORD}\"'|" "$config_file"
+    sed -i.bak "s|-D TCP_PORT=[^ ]*|-D TCP_PORT=${TCP_PORT}|" "$config_file"
+    sed -i.bak "s|-D WIFI_DEBUG_LOGGING=[^ ]*|-D WIFI_DEBUG_LOGGING=${WIFI_DEBUG_LOGGING}|" "$config_file"
+
+    # LoRa
+    sed -i.bak "s|-D LORA_FREQ=[^ ]*|-D LORA_FREQ=${LORA_FREQ}|" "$config_file"
+    sed -i.bak "s|-D LORA_BW=[^ ]*|-D LORA_BW=${LORA_BW}|" "$config_file"
+    sed -i.bak "s|-D LORA_SF=[^ ]*|-D LORA_SF=${LORA_SF}|" "$config_file"
+    sed -i.bak "s|-D LORA_CR=[^ ]*|-D LORA_CR=${LORA_CR}|" "$config_file"
+    sed -i.bak "s|-D LORA_TX_POWER=[^ ]*|-D LORA_TX_POWER=${LORA_TX_POWER}|" "$config_file"
+
+    # Memory / queues / contacts
+    sed -i.bak "s|-D MAX_CONTACTS=[^ ]*|-D MAX_CONTACTS=${MAX_CONTACTS}|" "$config_file"
+    sed -i.bak "s|-D MAX_GROUP_CHANNELS=[^ ]*|-D MAX_GROUP_CHANNELS=${MAX_GROUP_CHANNELS}|" "$config_file"
+    sed -i.bak "s|-D OFFLINE_QUEUE_SIZE=[^ ]*|-D OFFLINE_QUEUE_SIZE=${OFFLINE_QUEUE_SIZE}|" "$config_file"
+    sed -i.bak "s|-D MAX_UNREAD_MSGS=[^ ]*|-D MAX_UNREAD_MSGS=${MAX_UNREAD_MSGS}|" "$config_file"
+    sed -i.bak "s|-D MAX_BLOBRECS=[^ ]*|-D MAX_BLOBRECS=${MAX_BLOBRECS}|" "$config_file"
+
+    # Display
+    sed -i.bak "s|-D DISPLAY_CLASS=[^ ]*|-D DISPLAY_CLASS=${DISPLAY_CLASS}|" "$config_file"
+    sed -i.bak "s|-D AUTO_OFF_MILLIS=[^ ]*|-D AUTO_OFF_MILLIS=${AUTO_OFF_MILLIS}|" "$config_file"
+    sed -i.bak "s|-D UI_RECENT_LIST_SIZE=[^ ]*|-D UI_RECENT_LIST_SIZE=${UI_RECENT_LIST_SIZE}|" "$config_file"
+
+    # Debug
+    sed -i.bak "s|-D MESH_PACKET_LOGGING=[^ ]*|-D MESH_PACKET_LOGGING=${MESH_PACKET_LOGGING}|" "$config_file"
+    sed -i.bak "s|-D MESH_DEBUG=[^ ]*|-D MESH_DEBUG=${MESH_DEBUG}|" "$config_file"
+    sed -i.bak "s|-D BRIDGE_DEBUG=[^ ]*|-D BRIDGE_DEBUG=${BRIDGE_DEBUG}|" "$config_file"
+    sed -i.bak "s|-D BLE_DEBUG_LOGGING=[^ ]*|-D BLE_DEBUG_LOGGING=${BLE_DEBUG_LOGGING}|" "$config_file"
+
+    # Identity
+    sed -i.bak "s|-D ADVERT_NAME='\"[^\"]*\"'|-D ADVERT_NAME='\"${ADVERT_NAME}\"'|" "$config_file"
+    sed -i.bak "s|-D ADVERT_LAT=[^ ]*|-D ADVERT_LAT=${ADVERT_LAT}|" "$config_file"
+    sed -i.bak "s|-D ADVERT_LON=[^ ]*|-D ADVERT_LON=${ADVERT_LON}|" "$config_file"
+    sed -i.bak "s|-D ADMIN_PASSWORD='\"[^\"]*\"'|-D ADMIN_PASSWORD='\"${ADMIN_PASSWORD}\"'|" "$config_file"
 
     # Remove temp backup
     rm -f "${config_file}.bak"
 
-    log_success "WiFi configured"
-    log_info "  SSID: ${WIFI_SSID}"
-    log_info "  TCP Port: ${TCP_PORT} (hardcoded in MyMesh.cpp)"
+    log_success "Build flags configured"
+    log_info "  WiFi SSID: ${WIFI_SSID}"
+    log_info "  TCP Port:  ${TCP_PORT}"
+    log_info "  LoRa:      ${LORA_FREQ} MHz BW ${LORA_BW} SF${LORA_SF} CR${LORA_CR} TX ${LORA_TX_POWER} dBm"
 }
 
 build_firmware() {
@@ -330,7 +426,7 @@ main() {
     
     [ $DO_CLONE -eq 1 ] && clone_repository
     [ $DO_PATCH -eq 1 ] && apply_patches
-    [ $DO_CONFIGURE -eq 1 ] && configure_wifi
+    [ $DO_CONFIGURE -eq 1 ] && configure_build_flags
     [ $DO_BUILD -eq 1 ] && build_firmware
     [ $DO_UPLOAD -eq 1 ] && upload_firmware
     
