@@ -1,9 +1,9 @@
 --- a/variants/xiao_s3_wio/platformio.ini
 +++ b/variants/xiao_s3_wio/platformio.ini
-@@ -135,8 +135,8 @@
-   -D MAX_GROUP_CHANNELS=40
+@@ -182,8 +182,8 @@
    -D DISPLAY_CLASS=SSD1306Display
-   -D OFFLINE_QUEUE_SIZE=256
+   -D SERIAL_TX=D6
+   -D SERIAL_RX=D7
 -;  -D MESH_PACKET_LOGGING=1
 -;  -D MESH_DEBUG=1
 +  -D MESH_PACKET_LOGGING=1
@@ -11,7 +11,7 @@
  build_src_filter = ${Xiao_S3_WIO.build_src_filter}
    +<helpers/ui/SSD1306Display.cpp>
    +<helpers/esp32/*.cpp>
-@@ -148,6 +148,47 @@
+@@ -195,6 +195,47 @@
    densaugeo/base64 @ ~1.4.0
    adafruit/Adafruit SSD1306 @ ^2.5.13
  
@@ -56,6 +56,6 @@
 +  densaugeo/base64 @ ~1.4.0
 +  adafruit/Adafruit SSD1306 @ ^2.5.13
 +
- [env:Xiao_S3_WIO_companion_radio_ble]
+ [env:Xiao_S3_WIO_sensor]
  extends = Xiao_S3_WIO
- build_flags =
+ build_src_filter = ${Xiao_S3_WIO.build_src_filter}
