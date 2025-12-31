@@ -2,28 +2,13 @@ diff --git a/examples/companion_radio/MyMesh.h b/examples/companion_radio/MyMesh
 index 1fcc569..8a2fd80 100644
 --- a/examples/companion_radio/MyMesh.h
 +++ b/examples/companion_radio/MyMesh.h
-@@ -3,6 +3,7 @@
- #include <Arduino.h>
- #include <Mesh.h>
- #include "AbstractUITask.h"
-+#include <WiFi.h>
- 
- /*------------ Frame Protocol --------------*/
- #define FIRMWARE_VER_CODE 8
-@@ -200,6 +201,17 @@ private:
+@@ -200,6 +201,10 @@ private:
  
    TransportKey send_scope;
  
-+  // TCP Bridge Server (port 5002) for raw packet injection
-+  WiFiServer *_raw_packet_server;
-+  WiFiClient _raw_packet_client;
-+  uint8_t _raw_rx_buffer[512];
-+  int _raw_rx_pos;
-+  
-+  void handleRawPacketServer();
-+  bool parseRS232BridgePacket(const uint8_t *data, int len, mesh::Packet*& pkt_out);
-+  void displayReceivedPacket(const mesh::Packet *pkt);
-+  void sendPacketToTcpClients(const mesh::Packet *pkt);
++  // TCP relay helpers (packets from radio to TCP clients via SerialWifiInterface)
++  bool _tcp_relay_enabled;
++  void relayPacketToTcp(const mesh::Packet *pkt);
 +
    uint8_t cmd_frame[MAX_FRAME_SIZE + 1];
    uint8_t out_frame[MAX_FRAME_SIZE + 1];

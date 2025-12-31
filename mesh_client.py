@@ -3,16 +3,31 @@
 Simple mesh client - send and receive packets via TCP
 """
 
+import base64
+import hashlib
+import random
 import socket
-import sys
 import struct
+import sys
 import threading
 import time
 from datetime import datetime
 
+from Crypto.Cipher import AES
+from Crypto.Hash import HMAC, SHA256
+
 # Constants
 ROUTE_FLOOD = 0x01
 TYPE_GRP_TXT = 0x05
+
+# Public channel PSK (base64)
+PUBLIC_GROUP_PSK = "izOH6cXN6mrJ5e26oRXNcg=="
+
+# Sizes used by MeshCore crypto
+PATH_HASH_SIZE = 1
+CIPHER_MAC_SIZE = 2
+CIPHER_KEY_SIZE = 16
+PUB_KEY_SIZE = 32
 
 def fletcher16(data):
     """Calculate Fletcher-16 checksum"""
@@ -21,6 +36,74 @@ def fletcher16(data):
         sum1 = (sum1 + byte) % 255
         sum2 = (sum2 + sum1) % 255
     return bytes([sum2, sum1])
+
+
+def get_public_channel_secret():
+    """Decode base64 PSK to raw secret."""
+    return base64.b64decode(PUBLIC_GROUP_PSK)
+
+
+def get_public_channel_hash(secret):
+    """Calculate channel hash (SHA256 first byte)."""
+    sha = hashlib.sha256()
+    sha.update(secret)
+    return sha.digest()[0]
+
+
+def pad_to_block_size(data, block_size=16):
+    """Zero-pad to block size."""
+    padding_len = (block_size - (len(data) % block_size)) % block_size
+    if len(data) % block_size != 0:
+        padding_len = block_size - (len(data) % block_size)
+    return data + bytes(padding_len)
+
+
+def encrypt_aes128(secret, plaintext):
+    """AES-128 ECB with zero padding (matches MeshCore utils)."""
+    key = secret[:CIPHER_KEY_SIZE]
+    cipher = AES.new(key, AES.MODE_ECB)
+    padded = pad_to_block_size(plaintext, 16)
+    return cipher.encrypt(padded)
+
+
+def encrypt_then_mac(secret, plaintext):
+    """MeshCore encryptThenMAC: AES-128 + HMAC-SHA256 (2-byte MAC)."""
+    encrypted = encrypt_aes128(secret, plaintext)
+    mac = HMAC.new(secret[:PUB_KEY_SIZE], encrypted, SHA256).digest()[:CIPHER_MAC_SIZE]
+    return mac + encrypted
+
+
+def create_group_message_data(timestamp, sender_name, message):
+    """Assemble GRP_TXT payload before encryption."""
+    data = bytearray()
+    data.extend(struct.pack('<I', timestamp))
+    data.append(0x00)  # txt_type = plain text
+    formatted = f"{sender_name}: {message}".encode("utf-8")
+    data.extend(formatted)
+    return bytes(data)
+
+
+def create_group_text_packet(sender_name, message):
+    """Build full MeshCore packet for public channel GRP_TXT."""
+    secret = get_public_channel_secret()
+    channel_hash = get_public_channel_hash(secret)
+
+    timestamp = int(time.time())
+    data = create_group_message_data(timestamp, sender_name, message)
+
+    encrypted = encrypt_then_mac(secret, data)
+
+    payload = bytearray()
+    payload.append(channel_hash)
+    payload.extend(encrypted)
+
+    header = (TYPE_GRP_TXT << 2) | ROUTE_FLOOD  # 0x15
+
+    packet = bytearray()
+    packet.append(header)
+    packet.append(0x00)  # path_len = 0
+    packet.extend(payload)
+    return bytes(packet)
 
 def create_rs232_frame(packet):
     """Wrap packet in RS232Bridge frame"""
@@ -89,6 +172,14 @@ def display_packet(packet):
     print(f"Payload: {payload[:32].hex()}{'...' if len(payload) > 32 else ''}")
     print(f"{'='*60}")
 
+
+def send_group_text(sock, message, sender_name):
+    """Construct and send GRP_TXT packet via RS232 bridge."""
+    packet = create_group_text_packet(sender_name, message)
+    frame = create_rs232_frame(packet)
+    sock.sendall(frame)
+    print(f"[✓] Sent text as '{sender_name}' ({len(packet)}B packet)")
+
 def receiver_thread(sock, running):
     """Background receiver"""
     count = 0
@@ -119,18 +210,21 @@ def send_packet(sock, packet_hex):
 def main():
     if len(sys.argv) < 2:
         print("Usage:")
-        print(f"  {sys.argv[0]} <host> [port]")
+        print(f"  {sys.argv[0]} <host> [port] [sender]")
         print()
         print("Example:")
-        print(f"  {sys.argv[0]} 192.168.0.100 5002")
+        print(f"  {sys.argv[0]} 192.168.0.100 5002 Alice")
         print()
         print("Interactive commands:")
-        print("  <hex>     - Send raw packet (e.g., 15001165E1B5...)")
-        print("  quit/exit - Disconnect")
+        print("  <hex>        - Send raw packet (e.g., 15001165E1B5...)")
+        print("  msg <text>   - Build+send public GRP_TXT as sender")
+        print("  name <nick>  - Change sender name for msg")
+        print("  quit/exit    - Disconnect")
         sys.exit(1)
     
     host = sys.argv[1]
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 5002
+    sender_name = sys.argv[3] if len(sys.argv) > 3 else f"Bot{random.randint(1, 999)}"
     
     print(f"[*] Connecting to {host}:{port}...")
     
@@ -139,7 +233,8 @@ def main():
     try:
         sock.connect((host, port))
         print(f"[✓] Connected!")
-        print(f"\nType hex packet to send, or 'quit' to exit")
+        print(f"[*] Sender: {sender_name}")
+        print(f"\nType hex packet to send, or 'msg <text>' to auto-build public packet, or 'quit' to exit")
         print(f"{'='*60}\n")
         
         # Start receiver
@@ -159,6 +254,25 @@ def main():
                     running[0] = False
                     break
                 
+                lower = cmd.lower()
+
+                if lower.startswith(("msg ", "/msg ", "text ", "/text ")):
+                    text = cmd.split(" ", 1)[1].strip() if " " in cmd else ""
+                    if text:
+                        send_group_text(sock, text, sender_name)
+                    else:
+                        print("[!] No text provided")
+                    continue
+
+                if lower.startswith(("name ", "/name ")):
+                    new_name = cmd.split(" ", 1)[1].strip()
+                    if new_name:
+                        sender_name = new_name
+                        print(f"[*] Sender changed to {sender_name}")
+                    else:
+                        print("[!] No name provided")
+                    continue
+
                 # Assume hex packet
                 send_packet(sock, cmd)
                 
