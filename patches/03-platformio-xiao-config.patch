@@ -1,14 +1,16 @@
 --- a/variants/xiao_s3_wio/platformio.ini
 +++ b/variants/xiao_s3_wio/platformio.ini
 @@ -184,13 +184,53 @@
-  -;  -D MESH_DEBUG=1
-  build_src_filter = ${Xiao_S3_WIO.build_src_filter}
+   -D SERIAL_RX=D7
+ ;  -D MESH_PACKET_LOGGING=1
+ ;  -D MESH_DEBUG=1
+ build_src_filter = ${Xiao_S3_WIO.build_src_filter}
 +  +<helpers/ui/SSD1306Display.cpp>
 +  +<helpers/esp32/*.cpp>
 +  +<helpers/ui/MomentaryButton.cpp>
 +  +<../examples/companion_radio/*.cpp>
 +  +<../examples/companion_radio/ui-new/*.cpp>
-  lib_deps =
+ lib_deps =
     ${Xiao_S3_WIO.lib_deps}
     densaugeo/base64 @ ~1.4.0
     adafruit/Adafruit SSD1306 @ ^2.5.13
@@ -56,5 +58,5 @@
 +  file://arch/esp32/AsyncElegantOTA
 +  densaugeo/base64 @ ~1.4.0
 +  adafruit/Adafruit SSD1306 @ ^2.5.13
-  [env:Xiao_S3_WIO_sensor]
-  extends = Xiao_S3_WIO
+    [env:Xiao_S3_WIO_sensor]
+    extends = Xiao_S3_WIO
