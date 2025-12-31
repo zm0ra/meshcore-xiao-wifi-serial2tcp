@@ -1,26 +1,20 @@
-diff --git a/variants/xiao_s3_wio/platformio.ini b/variants/xiao_s3_wio/platformio.ini
-index 8979edc..85b086f 100644
 --- a/variants/xiao_s3_wio/platformio.ini
 +++ b/variants/xiao_s3_wio/platformio.ini
-@@ -182,8 +182,36 @@ build_flags =
+@@ -135,8 +135,8 @@
+   -D MAX_GROUP_CHANNELS=40
    -D DISPLAY_CLASS=SSD1306Display
-   -D SERIAL_TX=D6
-   -D SERIAL_RX=D7
+   -D OFFLINE_QUEUE_SIZE=256
 -;  -D MESH_PACKET_LOGGING=1
 -;  -D MESH_DEBUG=1
 +  -D MESH_PACKET_LOGGING=1
 +  -D MESH_DEBUG=1
-+build_src_filter = ${Xiao_S3_WIO.build_src_filter}
-+  +<helpers/ui/SSD1306Display.cpp>
-+  +<helpers/esp32/*.cpp>
-+  +<helpers/ui/MomentaryButton.cpp>
-+  +<../examples/companion_radio/*.cpp>
-+  +<../examples/companion_radio/ui-new/*.cpp>
-+lib_deps =
-+  ${Xiao_S3_WIO.lib_deps}
-+  densaugeo/base64 @ ~1.4.0
-+  adafruit/Adafruit SSD1306 @ ^2.5.13
-+
+ build_src_filter = ${Xiao_S3_WIO.build_src_filter}
+   +<helpers/ui/SSD1306Display.cpp>
+   +<helpers/esp32/*.cpp>
+@@ -148,6 +148,47 @@
+   densaugeo/base64 @ ~1.4.0
+   adafruit/Adafruit SSD1306 @ ^2.5.13
+ 
 +[env:Xiao_S3_WIO_companion_radio_wifi]
 +extends = Xiao_S3_WIO
 +build_flags =
@@ -32,25 +26,36 @@ index 8979edc..85b086f 100644
 +  -D WIFI_DEBUG_LOGGING=1
 +  -D WIFI_SSID='"YourNetwork"'
 +  -D WIFI_PWD='"YourPassword"'
-   -D LORA_FREQ=869.618
-   -D LORA_BW=62.5
-   -D LORA_SF=8
-   -D LORA_CR=5
-   -D MESH_PACKET_LOGGING=1
-   -D MESH_DEBUG=1
-   -D OFFLINE_QUEUE_SIZE=256
-   -D MAX_UNREAD_MSGS=32
-   -D MAX_BLOBRECS=100
-   -D AUTO_OFF_MILLIS=15000
-   -D UI_RECENT_LIST_SIZE=4
-   -D BRIDGE_DEBUG=0
-   -D BLE_DEBUG_LOGGING=0
-   -D TCP_PORT=5002
-   -D LORA_TX_POWER=22
-   -D ADVERT_NAME='"XiaoS3 WiFi"'
-   -D ADVERT_LAT=0.0
-   -D ADVERT_LON=0.0
-   -D ADMIN_PASSWORD='"password"'
- build_src_filter = ${Xiao_S3_WIO.build_src_filter}
-   +<helpers/ui/SSD1306Display.cpp>
-   +<helpers/esp32/*.cpp>
++  -D LORA_FREQ=869.618
++  -D LORA_BW=62.5
++  -D LORA_SF=8
++  -D LORA_CR=5
++  -D MESH_PACKET_LOGGING=1
++  -D MESH_DEBUG=1
++  -D OFFLINE_QUEUE_SIZE=256
++  -D MAX_UNREAD_MSGS=32
++  -D MAX_BLOBRECS=100
++  -D AUTO_OFF_MILLIS=15000
++  -D UI_RECENT_LIST_SIZE=4
++  -D BRIDGE_DEBUG=0
++  -D BLE_DEBUG_LOGGING=0
++  -D TCP_PORT=5002
++  -D LORA_TX_POWER=22
++  -D ADVERT_NAME='"XiaoS3 WiFi"'
++  -D ADVERT_LAT=0.0
++  -D ADVERT_LON=0.0
++  -D ADMIN_PASSWORD='"password"'
++build_src_filter = ${Xiao_S3_WIO.build_src_filter}
++  +<helpers/ui/SSD1306Display.cpp>
++  +<helpers/esp32/*.cpp>
++  +<helpers/ui/MomentaryButton.cpp>
++  +<../examples/companion_radio/*.cpp>
++  +<../examples/companion_radio/ui-new/*.cpp>
++lib_deps =
++  ${Xiao_S3_WIO.lib_deps}
++  densaugeo/base64 @ ~1.4.0
++  adafruit/Adafruit SSD1306 @ ^2.5.13
++
+ [env:Xiao_S3_WIO_companion_radio_ble]
+ extends = Xiao_S3_WIO
+ build_flags =
