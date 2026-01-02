@@ -60,6 +60,10 @@ ADVERT_NAME="XiaoS3 WiFi"
 ADVERT_LAT=0.0
 ADVERT_LON=0.0
 ADMIN_PASSWORD="password"
+GUEST_PASSWORD="${GUEST_PASSWORD:-guest}"
+
+# Build role (companion or repeater)
+BUILD_ROLE="companion"
 
 # Upload port (leave empty to auto-detect)
 UPLOAD_PORT=""
@@ -133,6 +137,43 @@ log_error() {
     echo -e "${RED}[✗]${NC} $1"
 }
 
+validate_config() {
+    log_info "Validating configuration for role: ${BUILD_ROLE}..."
+    
+    local missing=0
+    
+    if [ -z "$WIFI_SSID" ]; then
+        log_error "WIFI_SSID is required"
+        missing=1
+    fi
+    if [ -z "$WIFI_PASSWORD" ]; then
+        log_error "WIFI_PASSWORD is required"
+        missing=1
+    fi
+    
+    if [ "$BUILD_ROLE" = "repeater" ]; then
+        if [ -z "$ADMIN_PASSWORD" ]; then
+            log_error "ADMIN_PASSWORD is required for repeater"
+            missing=1
+        fi
+        if [ -z "$GUEST_PASSWORD" ]; then
+            log_error "GUEST_PASSWORD is required for repeater"
+            missing=1
+        fi
+        if [ -z "$ADVERT_NAME" ]; then
+            log_error "ADVERT_NAME is required for repeater"
+            missing=1
+        fi
+    fi
+    
+    if [ $missing -eq 1 ]; then
+        log_error "Configuration incomplete. Edit config.env and try again."
+        exit 1
+    fi
+    
+    log_success "Configuration valid"
+}
+
 detect_upload_port() {
     # If UPLOAD_PORT is set and exists, use it
     if [ -n "$UPLOAD_PORT" ] && [ -e "$UPLOAD_PORT" ]; then
@@ -171,7 +212,11 @@ print_header() {
 
 print_usage() {
         cat << 'EOF'
-Usage: ./build_companion.sh --build [--upload] [OPTIONS]
+Usage: ./build.sh [--repeater] --build [--upload] [OPTIONS]
+
+Firmware Roles:
+    (default)      Build companion radio (WiFi + LoRa bridge)
+    --repeater     Build repeater (mesh relay with admin interface)
 
 Steps:
     --build        Clone/patch/configure (unless skipped) and build firmware
@@ -185,9 +230,10 @@ Options:
     --help         Show this help
 
 Examples:
-    ./build_companion.sh --build
-    ./build_companion.sh --build --upload
-    ./build_companion.sh --upload          # requires existing firmware.bin
+    ./build.sh --build                             # Build companion
+    ./build.sh --repeater --build --upload         # Build repeater
+    ./build.sh --build --upload                    # Build & upload companion
+    ./build.sh --upload                            # Upload existing firmware
 EOF
 }
 
@@ -256,6 +302,22 @@ apply_patches() {
     
     log_success "Patches applied"
 }
+navigate_to_firmware_source() {
+    log_info "Preparing firmware source for role: ${BUILD_ROLE}..."
+    cd "$REPO_DIR"
+    if [ "$BUILD_ROLE" = "repeater" ]; then
+        if [ ! -d "examples/simple_repeater" ]; then
+            log_error "Repeater firmware not found at examples/simple_repeater"
+            exit 1
+        fi
+        cd "examples/simple_repeater"
+        log_success "Ready to build repeater from examples/simple_repeater"
+    else
+        cd "$REPO_DIR"
+        apply_patches
+        log_success "Ready to build companion"
+    fi
+}
 
 configure_build_flags() {
     log_info "Configuring build flags (platformio.ini)..."
@@ -316,6 +378,36 @@ configure_build_flags() {
     log_info "  WiFi SSID: ${WIFI_SSID}"
     log_info "  TCP Port:  ${TCP_PORT}"
     log_info "  LoRa:      ${LORA_FREQ} MHz BW ${LORA_BW} SF${LORA_SF} CR${LORA_CR} TX ${LORA_TX_POWER} dBm"
+}
+configure_repeater_build_flags() {
+    log_info "Configuring build flags for repeater (platformio.ini)..."
+    local config_file="${REPO_DIR}/examples/simple_repeater/platformio.ini"
+    if [ ! -f "$config_file" ]; then
+        log_error "Config file not found: ${config_file}"
+        exit 1
+    fi
+    if [ ! -f "${config_file}.orig" ]; then
+        cp "$config_file" "${config_file}.orig"
+    fi
+    sed -i.bak "s|-D WIFI_SSID=\"[^\"]*\"|-D WIFI_SSID=\"${WIFI_SSID}\"|" "$config_file"
+    sed -i.bak "s|-D WIFI_PWD=\"[^\"]*\"|-D WIFI_PWD=\"${WIFI_PASSWORD}\"|" "$config_file"
+    sed -i.bak "s|-D TCP_PORT=[^ ]*|-D TCP_PORT=${TCP_PORT}|" "$config_file"
+    sed -i.bak "s|-D ADMIN_PASSWORD=\"[^\"]*\"|-D ADMIN_PASSWORD=\"${ADMIN_PASSWORD}\"|" "$config_file"
+    sed -i.bak "s|-D GUEST_PASSWORD=\"[^\"]*\"|-D GUEST_PASSWORD=\"${GUEST_PASSWORD}\"|" "$config_file"
+    sed -i.bak "s|-D ADVERT_NAME=\"[^\"]*\"|-D ADVERT_NAME=\"${ADVERT_NAME}\"|" "$config_file"
+    sed -i.bak "s|-D ADVERT_LAT=[^ ]*|-D ADVERT_LAT=${ADVERT_LAT}|" "$config_file"
+    sed -i.bak "s|-D ADVERT_LON=[^ ]*|-D ADVERT_LON=${ADVERT_LON}|" "$config_file"
+    sed -i.bak "s|-D LORA_FREQ=[^ ]*|-D LORA_FREQ=${LORA_FREQ}|" "$config_file"
+    sed -i.bak "s|-D LORA_BW=[^ ]*|-D LORA_BW=${LORA_BW}|" "$config_file"
+    sed -i.bak "s|-D LORA_SF=[^ ]*|-D LORA_SF=${LORA_SF}|" "$config_file"
+    sed -i.bak "s|-D LORA_CR=[^ ]*|-D LORA_CR=${LORA_CR}|" "$config_file"
+    sed -i.bak "s|-D LORA_TX_POWER=[^ ]*|-D LORA_TX_POWER=${LORA_TX_POWER}|" "$config_file"
+    rm -f "${config_file}.bak"
+    log_success "Build flags configured for repeater"
+    log_info "  WiFi SSID: ${WIFI_SSID}"
+    log_info "  Admin Password: ***"
+    log_info "  Node Name: ${ADVERT_NAME}"
+    log_info "  LoRa: ${LORA_FREQ} MHz BW ${LORA_BW} SF${LORA_SF} CR${LORA_CR} TX ${LORA_TX_POWER} dBm"
 }
 
 build_firmware() {
@@ -406,6 +498,11 @@ main() {
     
     while [[ $# -gt 0 ]]; do
         case $1 in
+            --repeater)
+                BUILD_ROLE="repeater"
+                PIO_ENV="Xiao_S3_WIO_repeater"
+                shift
+                ;;
             --build)
                 DO_BUILD=1
                 shift
@@ -471,9 +568,20 @@ main() {
 
     check_dependencies
     
+    # Only validate config if doing something
+    if [ $DO_CLONE -eq 1 ] || [ $DO_PATCH -eq 1 ] || [ $DO_CONFIGURE -eq 1 ] || [ $DO_BUILD -eq 1 ]; then
+        validate_config
+    fi
+    
     [ $DO_CLONE -eq 1 ] && clone_repository
-    [ $DO_PATCH -eq 1 ] && apply_patches
-    [ $DO_CONFIGURE -eq 1 ] && configure_build_flags
+    [ $DO_PATCH -eq 1 ] && navigate_to_firmware_source
+    if [ $DO_CONFIGURE -eq 1 ]; then
+        if [ "$BUILD_ROLE" = "repeater" ]; then
+            configure_repeater_build_flags
+        else
+            configure_build_flags
+        fi
+    fi
     [ $DO_BUILD -eq 1 ] && build_firmware
     [ $DO_UPLOAD -eq 1 ] && upload_firmware
     
