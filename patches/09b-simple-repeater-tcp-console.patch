@@ -89,7 +89,12 @@ index 4214c2f..6ee7830 100644
 +      continue;
 +    }
 +
-+    if (ch == '\n') continue;
++    if (ch == '\n') {
++      if (_console_cmd_len == 0) {
++        continue;
++      }
++      ch = '\r';
++    }
 +
 +    if (_console_cmd_len < (int)sizeof(_console_cmd) - 1 && ch != '\r') {
 +      _console_cmd[_console_cmd_len++] = ch;
