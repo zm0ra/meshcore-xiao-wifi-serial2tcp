@@ -1,5 +1,5 @@
 diff --git a/examples/companion_radio/MyMesh.h b/examples/companion_radio/MyMesh.h
-index 1fcc569..8a2fd80 100644
+index 1fcc569..423658c 100644
 --- a/examples/companion_radio/MyMesh.h
 +++ b/examples/companion_radio/MyMesh.h
 @@ -3,6 +3,7 @@
@@ -10,20 +10,31 @@ index 1fcc569..8a2fd80 100644
  
  /*------------ Frame Protocol --------------*/
  #define FIRMWARE_VER_CODE 8
-@@ -200,6 +201,17 @@ private:
- 
-   TransportKey send_scope;
+@@ -173,6 +174,15 @@ private:
+   void checkCLIRescueCmd();
+   void checkSerialInterface();
  
 +  // TCP Bridge Server (port 5002) for raw packet injection
-+  WiFiServer *_raw_packet_server;
-+  WiFiClient _raw_packet_client;
-+  uint8_t _raw_rx_buffer[512];
-+  int _raw_rx_pos;
-+  
 +  void handleRawPacketServer();
 +  bool parseRS232BridgePacket(const uint8_t *data, int len, mesh::Packet*& pkt_out);
 +  void displayReceivedPacket(const mesh::Packet *pkt);
 +  void sendPacketToTcpClients(const mesh::Packet *pkt);
++  void logPacketSummary(const mesh::Packet *pkt, const char *tag);
++  void dumpHexLine(const char *tag, const uint8_t *buf, int len);
++  void sendRS232BridgeFrameToTcp(const uint8_t *payload, int len);
++
+   // helpers, short-cuts
+   void saveChannels() { _store->saveChannels(this); }
+   void saveContacts() { _store->saveContacts(this); }
+@@ -200,6 +210,12 @@ private:
+ 
+   TransportKey send_scope;
+ 
++  #define MAX_TCP_CLIENTS 4
++  WiFiServer *_raw_packet_server;
++  WiFiClient _raw_packet_clients[MAX_TCP_CLIENTS];
++  uint8_t _raw_rx_buffer[MAX_TCP_CLIENTS][512];
++  int _raw_rx_pos[MAX_TCP_CLIENTS];
 +
    uint8_t cmd_frame[MAX_FRAME_SIZE + 1];
    uint8_t out_frame[MAX_FRAME_SIZE + 1];

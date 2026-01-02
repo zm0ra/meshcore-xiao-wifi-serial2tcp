@@ -1,75 +1,116 @@
 diff --git a/examples/companion_radio/MyMesh.cpp b/examples/companion_radio/MyMesh.cpp
-index 09d866c..fbdd095 100644
+index 09d866c..7c84d6d 100644
 --- a/examples/companion_radio/MyMesh.cpp
 +++ b/examples/companion_radio/MyMesh.cpp
-@@ -473,6 +473,10 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
+@@ -255,6 +255,12 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+ 
+     _serial->writeFrame(out_frame, i);
+   }
++
++  // Mirror all raw frames to TCP client using RS232Bridge framing (USB <-> TCP symmetry)
++  sendRS232BridgeFrameToTcp(raw, len);
++
++  // Console hex dump for visibility when debug flags are off
++  dumpHexLine("RAW", raw, len);
+ }
+ 
+ bool MyMesh::isAutoAddEnabled() const {
+@@ -421,12 +427,21 @@ void MyMesh::onMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t
+                            const char *text) {
+   markConnectionActive(from); // in case this is from a server, and we have a connection
+   queueMessage(from, TXT_TYPE_PLAIN, pkt, sender_timestamp, NULL, 0, text);
++
++  // Console log + forward to TCP
++  logPacketSummary(pkt, "MSG");
++  // Forward all private messages to TCP clients
++  sendPacketToTcpClients(pkt);
+ }
+ 
+ void MyMesh::onCommandDataRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp,
+                                const char *text) {
+   markConnectionActive(from); // in case this is from a server, and we have a connection
+   queueMessage(from, TXT_TYPE_CLI_DATA, pkt, sender_timestamp, NULL, 0, text);
++
++  logPacketSummary(pkt, "CMD");
++  // Forward CLI/command messages to TCP clients
++  sendPacketToTcpClients(pkt);
+ }
+ 
+ void MyMesh::onSignedMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp,
+@@ -435,6 +450,10 @@ void MyMesh::onSignedMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uin
+   // from.sync_since change needs to be persisted
+   dirty_contacts_expiry = futureMillis(LAZY_CONTACTS_WRITE_DELAY);
+   queueMessage(from, TXT_TYPE_SIGNED_PLAIN, pkt, sender_timestamp, sender_prefix, 4, text);
++
++  logPacketSummary(pkt, "SIGNED");
++   // Forward signed messages to TCP clients
++  sendPacketToTcpClients(pkt);
+ }
+ 
+ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packet *pkt, uint32_t timestamp,
+@@ -473,6 +492,10 @@ void MyMesh::onChannelMessageRecv(const mesh::GroupChannel &channel, mesh::Packe
      if (_ui) _ui->notify(UIEventType::channelMessage);
  #endif
    }
-+  
++
++  logPacketSummary(pkt, "CHAN");
 +  // Send packet to TCP clients
 +  sendPacketToTcpClients(pkt);
-+  
  #ifdef DISPLAY_CLASS
    // Get the channel name from the channel index
    const char *channel_name = "Unknown";
-@@ -673,6 +677,9 @@ void MyMesh::onRawDataRecv(mesh::Packet *packet) {
+@@ -673,6 +696,10 @@ void MyMesh::onRawDataRecv(mesh::Packet *packet) {
    } else {
      MESH_DEBUG_PRINTLN("onRawDataRecv(), data received while app offline");
    }
-+  
++
++  logPacketSummary(packet, "RAW");
 +  // Send packet to TCP clients
 +  sendPacketToTcpClients(packet);
  }
  
  void MyMesh::onTraceRecv(mesh::Packet *packet, uint32_t tag, uint32_t auth_code, uint8_t flags,
-@@ -729,6 +736,10 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
-   dirty_contacts_expiry = 0;
+@@ -730,6 +757,12 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
    memset(advert_paths, 0, sizeof(advert_paths));
    memset(send_scope.key, 0, sizeof(send_scope.key));
-+  
+ 
 +  // Raw packet server initialization
 +  _raw_packet_server = NULL;
-+  _raw_rx_pos = 0;
- 
++  for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
++    _raw_rx_pos[i] = 0;
++  }
++
    // defaults
    memset(&_prefs, 0, sizeof(_prefs));
-@@ -803,6 +814,8 @@ void MyMesh::begin(bool has_display) {
- 
-   radio_set_params(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
-   radio_set_tx_power(_prefs.tx_power_dbm);
-+  
-+  // Note: Raw packet server initialization moved to loop() for lazy init
- }
- 
- const char *MyMesh::getNodeName() {
-@@ -1840,6 +1853,19 @@ void MyMesh::loop() {
-   } else {
+   _prefs.airtime_factor = 1.0; // one half
+@@ -1841,6 +1874,21 @@ void MyMesh::loop() {
      checkSerialInterface();
    }
-+  
+ 
 +  // Lazy initialize raw packet server on first loop
 +  if (_raw_packet_server == NULL) {
 +    _raw_packet_server = new WiFiServer(5002);
 +    if (_raw_packet_server) {
 +      _raw_packet_server->begin();
-+      _raw_rx_pos = 0;
++      for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
++        _raw_rx_pos[i] = 0;
++      }
 +      MESH_DEBUG_PRINTLN("Raw packet server started on port 5002");
 +    }
 +  }
-+  
++
 +  // Handle raw packet server (TCP port 5002)
 +  handleRawPacketServer();
- 
++
    // is there are pending dirty contacts write needed?
    if (dirty_contacts_expiry && millisHasNowPassed(dirty_contacts_expiry)) {
-@@ -1865,4 +1891,275 @@ bool MyMesh::advert() {
+     saveContacts();
+@@ -1865,4 +1913,324 @@ bool MyMesh::advert() {
    } else {
      return false;
    }
--}
-\ No newline at end of file
 +}
++
 +// ===================== RAW PACKET SERVER (TCP 5002) =====================
 +
 +// Note: WiFiServer initialization is now done lazily in loop() to ensure
@@ -77,92 +118,112 @@ index 09d866c..fbdd095 100644
 +
 +void MyMesh::handleRawPacketServer() {
 +  if (_raw_packet_server == NULL) return;
-+  
-+  // Accept new client connection
-+  if (!_raw_packet_client.connected()) {
-+    _raw_packet_client = _raw_packet_server->available();
-+    if (_raw_packet_client) {
-+      _raw_rx_pos = 0;
-+      MESH_DEBUG_PRINTLN("Raw packet client connected");
-+    }
-+    return;
-+  }
-+  
-+  // Read available data from client
-+  while (_raw_packet_client.available()) {
-+    if (_raw_rx_pos >= sizeof(_raw_rx_buffer)) {
-+      // Buffer full, drop oldest data
-+      memcpy(_raw_rx_buffer, _raw_rx_buffer + 256, sizeof(_raw_rx_buffer) - 256);
-+      _raw_rx_pos = sizeof(_raw_rx_buffer) - 256;
-+    }
-+    
-+    int byte = _raw_packet_client.read();
-+    if (byte >= 0) {
-+      _raw_rx_buffer[_raw_rx_pos++] = (uint8_t)byte;
-+      
-+      // Try to parse packet if we have enough data
-+      if (_raw_rx_pos >= 6) {  // Minimum: 2B magic + 2B length + payload + 2B checksum
-+        uint16_t magic = (_raw_rx_buffer[0] << 8) | _raw_rx_buffer[1];
-+        if (magic == 0xC03E) {
-+          uint16_t length = (_raw_rx_buffer[2] << 8) | _raw_rx_buffer[3];
-+          int total_frame_size = 6 + length;  // 2B magic + 2B length + payload + 2B checksum
-+          
-+          if (_raw_rx_pos >= total_frame_size) {
-+            // We have a complete frame
-+            mesh::Packet *pkt = NULL;
-+            if (parseRS232BridgePacket(_raw_rx_buffer, total_frame_size, pkt)) {
-+              if (pkt) {
-+                MESH_DEBUG_PRINTLN("Injecting virtual packet to mesh (FLOOD mode)");
-+                displayReceivedPacket(pkt);  // Display received packet info
-+                sendFlood(pkt);  // Send in FLOOD mode
-+              }
-+            } else {
-+              MESH_DEBUG_PRINTLN("Failed to parse RS232Bridge packet");
-+            }
-+            
-+            // Remove processed frame from buffer
-+            memcpy(_raw_rx_buffer, _raw_rx_buffer + total_frame_size, _raw_rx_pos - total_frame_size);
-+            _raw_rx_pos -= total_frame_size;
-+          }
-+        } else {
-+          // Invalid magic, try to resync
-+          MESH_DEBUG_PRINTLN("Invalid magic byte, resyncing...");
-+          _raw_rx_pos = 0;
++
++  // Accept new client connections
++  if (_raw_packet_server->hasClient()) {
++    WiFiClient new_client = _raw_packet_server->available();
++    if (new_client) {
++      // Find free slot
++      bool added = false;
++      for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
++        if (!_raw_packet_clients[i] || !_raw_packet_clients[i].connected()) {
++          _raw_packet_clients[i] = new_client;
++          _raw_rx_pos[i] = 0;
++          MESH_DEBUG_PRINTLN("Raw packet client %d connected", i);
++          added = true;
++          break;
 +        }
++      }
++      if (!added) {
++        MESH_DEBUG_PRINTLN("Max TCP clients reached, rejecting connection");
++        new_client.stop();
 +      }
 +    }
 +  }
-+  
-+  // Check if client disconnected
-+  if (!_raw_packet_client.connected()) {
-+    _raw_packet_client.stop();
-+    _raw_rx_pos = 0;
-+    MESH_DEBUG_PRINTLN("Raw packet client disconnected");
++
++  // Process each connected client
++  for (int client_idx = 0; client_idx < MAX_TCP_CLIENTS; client_idx++) {
++    WiFiClient &client = _raw_packet_clients[client_idx];
++    if (!client || !client.connected()) {
++      if (client) {
++        client.stop();
++        _raw_rx_pos[client_idx] = 0;
++      }
++      continue;
++    }
++
++    // Read available data from this client
++    while (client.available()) {
++      if (_raw_rx_pos[client_idx] >= (int)sizeof(_raw_rx_buffer[client_idx])) {
++        // Buffer full, drop oldest data
++        memcpy(_raw_rx_buffer[client_idx], _raw_rx_buffer[client_idx] + 256, 
++               sizeof(_raw_rx_buffer[client_idx]) - 256);
++        _raw_rx_pos[client_idx] = sizeof(_raw_rx_buffer[client_idx]) - 256;
++      }
++
++      int byte = client.read();
++      if (byte < 0) continue;
++      
++      // Skip newline delimiters (optional in RS232Bridge, but adapters may send them)
++      if (byte == '\n' || byte == '\r') continue;
++      
++      _raw_rx_buffer[client_idx][_raw_rx_pos[client_idx]++] = (uint8_t)byte;
++
++      // Only RS232Bridge frames are accepted: 0xC03E | len | payload | checksum
++      if (_raw_rx_pos[client_idx] >= 6) {  // Minimum: 2B magic + 2B length + payload + 2B checksum
++        uint16_t magic = (_raw_rx_buffer[client_idx][0] << 8) | _raw_rx_buffer[client_idx][1];
++        if (magic == 0xC03E) {
++          uint16_t length = (_raw_rx_buffer[client_idx][2] << 8) | _raw_rx_buffer[client_idx][3];
++          int total_frame_size = 6 + length;  // 2B magic + 2B length + payload + 2B checksum
++
++          if (_raw_rx_pos[client_idx] >= total_frame_size) {
++            mesh::Packet *pkt = NULL;
++            if (parseRS232BridgePacket(_raw_rx_buffer[client_idx], total_frame_size, pkt)) {
++              if (pkt) {
++                MESH_DEBUG_PRINTLN("Injecting virtual packet to mesh (FLOOD mode) [RS232 client %d]", client_idx);
++                displayReceivedPacket(pkt);
++                sendFlood(pkt);
++              }
++            } else {
++              MESH_DEBUG_PRINTLN("Failed to parse RS232Bridge packet (client %d)", client_idx);
++            }
++
++            // Remove processed frame from buffer
++            memcpy(_raw_rx_buffer[client_idx], _raw_rx_buffer[client_idx] + total_frame_size, 
++                   _raw_rx_pos[client_idx] - total_frame_size);
++            _raw_rx_pos[client_idx] -= total_frame_size;
++          }
++        } else {
++          // Invalid magic, reset
++          _raw_rx_pos[client_idx] = 0;
++        }
++      }
++    }
 +  }
 +}
 +
 +bool MyMesh::parseRS232BridgePacket(const uint8_t *data, int len, mesh::Packet*& pkt_out) {
 +  pkt_out = NULL;
-+  
++
 +  if (len < 6) return false;  // Too short
-+  
++
 +  // Verify magic (0xC03E)
 +  uint16_t magic = (data[0] << 8) | data[1];
 +  if (magic != 0xC03E) {
 +    MESH_DEBUG_PRINTLN("Invalid magic: 0x%04X", magic);
 +    return false;
 +  }
-+  
++
 +  // Get length
 +  uint16_t payload_len = (data[2] << 8) | data[3];
 +  if (len != 6 + payload_len) {
 +    MESH_DEBUG_PRINTLN("Length mismatch: expected %d, got %d", 6 + payload_len, len);
 +    return false;
 +  }
-+  
++
 +  // Get checksum from packet
 +  uint16_t received_checksum = (data[4 + payload_len] << 8) | data[5 + payload_len];
-+  
++
 +  // Calculate Fletcher-16 checksum on payload
 +  uint16_t sum1 = 0, sum2 = 0;
 +  const uint8_t *payload = data + 4;
@@ -171,26 +232,26 @@ index 09d866c..fbdd095 100644
 +    sum2 = (sum2 + sum1) % 255;
 +  }
 +  uint16_t calculated_checksum = (sum2 << 8) | sum1;
-+  
++
 +  if (calculated_checksum != received_checksum) {
 +    MESH_DEBUG_PRINTLN("Checksum mismatch: expected 0x%04X, got 0x%04X", calculated_checksum, received_checksum);
 +    return false;
 +  }
-+  
++
 +  // Parse packet from payload
 +  pkt_out = _mgr->allocNew();
 +  if (!pkt_out) {
 +    MESH_DEBUG_PRINTLN("Failed to allocate packet");
 +    return false;
 +  }
-+  
++
 +  // Debug: show payload hex
 +  MESH_DEBUG_PRINT("Payload hex (%d bytes): ", payload_len);
 +  for (int i = 0; i < payload_len && i < 32; i++) {
 +    MESH_DEBUG_PRINT("%02X ", payload[i]);
 +  }
 +  MESH_DEBUG_PRINTLN("");
-+  
++
 +  // Copy payload to packet buffer
 +  if (!pkt_out->readFrom(payload, payload_len)) {
 +    MESH_DEBUG_PRINTLN("Failed to read packet data (payload_len=%d)", payload_len);
@@ -198,18 +259,18 @@ index 09d866c..fbdd095 100644
 +    pkt_out = NULL;
 +    return false;
 +  }
-+  
++
 +  MESH_DEBUG_PRINTLN("Parsed RS232Bridge packet: %d bytes", payload_len);
 +  return true;
 +}
 +
 +void MyMesh::displayReceivedPacket(const mesh::Packet *pkt) {
 +  if (pkt == NULL) return;
-+  
++
 +  // Extract packet information
 +  uint8_t route_type = pkt->getRouteType();
 +  uint8_t payload_type = pkt->getPayloadType();
-+  
++
 +  // Route type string
 +  const char *route_str;
 +  switch(route_type) {
@@ -219,7 +280,7 @@ index 09d866c..fbdd095 100644
 +    case 0x03: route_str = "TRANSPORT_DIRECT"; break;
 +    default: route_str = "UNKNOWN"; break;
 +  }
-+  
++
 +  // Payload type string
 +  const char *type_str;
 +  switch(payload_type) {
@@ -238,17 +299,17 @@ index 09d866c..fbdd095 100644
 +    case 0x0F: type_str = "RAW_CUSTOM"; break;
 +    default: type_str = "UNKNOWN"; break;
 +  }
-+  
-+  Serial.printf("\n═══════════════════════════════════════════════════════════\n");
-+  Serial.printf("📦 RECEIVED PACKET FROM TCP (5002)\n");
-+  Serial.printf("═══════════════════════════════════════════════════════════\n");
++
++  Serial.printf("\n===========================================================\n");
++  Serial.printf("PACKET FROM TCP (5002)\n");
++  Serial.printf("===========================================================\n");
 +  Serial.printf("Header:       0x%02X\n", pkt->header);
 +  Serial.printf("  Route:      %s (0x%02X)\n", route_str, route_type);
 +  Serial.printf("  Type:       %s (0x%02X)\n", type_str, payload_type);
 +  Serial.printf("  Version:    0x%02X\n", pkt->getPayloadVer());
 +  Serial.printf("Path length:  %d bytes\n", pkt->path_len);
 +  Serial.printf("Payload len:  %d bytes\n", pkt->payload_len);
-+  
++
 +  // Display path if present
 +  if (pkt->path_len > 0) {
 +    Serial.printf("Path:         ");
@@ -257,7 +318,7 @@ index 09d866c..fbdd095 100644
 +    }
 +    Serial.printf("\n");
 +  }
-+  
++
 +  // Display payload hex (first 64 bytes)
 +  Serial.printf("Payload hex:  ");
 +  int display_len = (pkt->payload_len > 64) ? 64 : pkt->payload_len;
@@ -271,73 +332,102 @@ index 09d866c..fbdd095 100644
 +    Serial.printf("... (%d more bytes)", pkt->payload_len - 64);
 +  }
 +  Serial.printf("\n");
-+  
++
 +  // Try to parse GRP_TXT payload
 +  if (payload_type == 0x05 && pkt->payload_len > 3) {  // GRP_TXT
 +    uint8_t channel_hash = pkt->payload[0];
 +    Serial.printf("\nGroup Message Details:\n");
 +    Serial.printf("  Channel hash: 0x%02X\n", channel_hash);
-+    
++
 +    // MAC is bytes 1-2
 +    uint16_t mac = (pkt->payload[1] << 8) | pkt->payload[2];
 +    Serial.printf("  MAC:          0x%04X\n", mac);
-+    
++
 +    Serial.printf("  Encrypted:    %d bytes (compressed)\n", pkt->payload_len - 3);
-+    
++
 +    // Try to find which channel this is (iterate through available channels)
 +    for (int i = 0; i < 16; i++) {  // Max channels
 +      ChannelDetails ch;
 +      if (getChannel(i, ch) && ch.channel.hash[0] == channel_hash) {
-+        Serial.printf("  → Matched to: '%s' channel\n", ch.name);
++        Serial.printf("  -> Matched to: '%s' channel\n", ch.name);
 +        break;
 +      }
 +    }
 +  }
-+  
-+  Serial.printf("═══════════════════════════════════════════════════════════\n\n");
++
++  Serial.printf("===========================================================\n\n");
 +}
 +
 +void MyMesh::sendPacketToTcpClients(const mesh::Packet *pkt) {
 +  if (pkt == NULL) return;
-+  if (!_raw_packet_client.connected()) return;
-+  
 +  // Serialize packet to wire format
 +  uint8_t packet_buffer[256];
 +  uint8_t packet_len = pkt->writeTo(packet_buffer);
-+  
-+  // Build RS232Bridge frame
-+  uint8_t frame[512];
-+  int frame_pos = 0;
-+  
-+  // Magic
-+  frame[frame_pos++] = 0xC0;
-+  frame[frame_pos++] = 0x3E;
-+  
-+  // Length (big-endian)
-+  frame[frame_pos++] = (packet_len >> 8) & 0xFF;
-+  frame[frame_pos++] = packet_len & 0xFF;
-+  
-+  // Packet data
-+  memcpy(&frame[frame_pos], packet_buffer, packet_len);
-+  frame_pos += packet_len;
-+  
-+  // Calculate Fletcher-16 checksum
++
++  // Wrap as RS232Bridge frame and send to TCP
++  sendRS232BridgeFrameToTcp(packet_buffer, packet_len);
++}
++
++void MyMesh::logPacketSummary(const mesh::Packet *pkt, const char *tag) {
++  if (pkt == NULL) return;
++  const char *label = tag ? tag : "PKT";
++  Serial.printf("[BRIDGE] %s route=0x%02X type=0x%02X len=%d path=%d\n",
++           label,
++           pkt->getRouteType(),
++           pkt->getPayloadType(),
++           pkt->payload_len,
++           pkt->path_len);
++}
++
++void MyMesh::dumpHexLine(const char *tag, const uint8_t *buf, int len) {
++  if (!buf || len <= 0) return;
++  const char *label = tag ? tag : "HEX";
++  Serial.printf("[BRIDGE] %s len=%d data=", label, len);
++  int max_bytes = (len > 64) ? 64 : len;  // avoid flooding the console
++  for (int i = 0; i < max_bytes; i++) {
++    Serial.printf("%02X", buf[i]);
++    if (i != max_bytes - 1) Serial.print(' ');
++  }
++  if (len > max_bytes) Serial.print(" ...");
++  Serial.println();
++}
++
++void MyMesh::sendRS232BridgeFrameToTcp(const uint8_t *payload, int len) {
++  if (!payload || len <= 0) return;
++
++  // Build RS232Bridge frame: 0xC03E | len | payload | Fletcher-16
++  if (len + 6 > 520) return;  // safety guard
++  uint8_t frame[520];
++  frame[0] = 0xC0;
++  frame[1] = 0x3E;
++  frame[2] = (uint8_t)((len >> 8) & 0xFF);
++  frame[3] = (uint8_t)(len & 0xFF);
++  memcpy(&frame[4], payload, len);
++
 +  uint16_t sum1 = 0, sum2 = 0;
-+  for (int i = 0; i < packet_len; i++) {
-+    sum1 = (sum1 + packet_buffer[i]) % 255;
++  for (int i = 0; i < len; i++) {
++    sum1 = (sum1 + payload[i]) % 255;
 +    sum2 = (sum2 + sum1) % 255;
 +  }
-+  
-+  // Checksum (sum2, sum1 order)
-+  frame[frame_pos++] = sum2;
-+  frame[frame_pos++] = sum1;
-+  
-+  // Send to TCP client
-+  int bytes_sent = _raw_packet_client.write(frame, frame_pos);
-+  
-+  if (bytes_sent != frame_pos) {
-+    MESH_DEBUG_PRINTLN("TCP send error: sent %d/%d bytes", bytes_sent, frame_pos);
-+  } else {
-+    MESH_DEBUG_PRINTLN("TCP TX: sent %d bytes to client", frame_pos);
++  frame[4 + len] = (uint8_t)(sum2 & 0xFF);
++  frame[5 + len] = (uint8_t)(sum1 & 0xFF);
++
++  int frame_len = 6 + len;
++
++  // Send to all connected clients
++  int sent_count = 0;
++  for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
++    if (_raw_packet_clients[i] && _raw_packet_clients[i].connected()) {
++      int bytes_sent = _raw_packet_clients[i].write(frame, frame_len);
++      _raw_packet_clients[i].write((uint8_t)'\n');  // Line delimiter for stream-based parsers
++      if (bytes_sent == frame_len) {
++        sent_count++;
++      }
++    }
 +  }
-+}
++  
++  if (sent_count > 0) {
++    MESH_DEBUG_PRINTLN("TCP TX (RS232): %d bytes + \\n to %d clients", frame_len, sent_count);
++  }
+ }
+\ No newline at end of file
