@@ -12,12 +12,12 @@ index 0000000..e35c986
 +; Build flags for WiFi + TCP bridge repeater
 +build_flags =
 +  ${Xiao_S3_WIO.build_flags}
-+  -D WIFI_SSID=\"WiFiNetwork\"
-+  -D WIFI_PWD=\"WiFiPassword\"
++  -D WIFI_SSID="WiFiNetwork"
++  -D WIFI_PWD="WiFiPassword"
 +  -D TCP_PORT=5002
-+  -D ADMIN_PASSWORD=\"changeme\"
-+  -D GUEST_PASSWORD=\"guest\"
-+  -D ADVERT_NAME=\"XiaoS3 Repeater\"
++  -D ADMIN_PASSWORD="changeme"
++  -D GUEST_PASSWORD="guest"
++  -D ADVERT_NAME="XiaoS3 Repeater"
 +  -D ADVERT_LAT=0.0
 +  -D ADVERT_LON=0.0
 +  -D LORA_FREQ=869.618
