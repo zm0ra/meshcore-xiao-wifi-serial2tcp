@@ -1,0 +1,18 @@
+diff --git a/examples/simple_repeater/MyMesh.cpp b/examples/simple_repeater/MyMesh.cpp
+index ac3f1c6..4214c2f 100644
+--- a/examples/simple_repeater/MyMesh.cpp
++++ b/examples/simple_repeater/MyMesh.cpp
+@@ -34,6 +34,13 @@
+   #define ADMIN_PASSWORD "password"
+ #endif
+ 
++#ifndef WIFI_SSID
++  #define WIFI_SSID ""
++#endif
++#ifndef WIFI_PASSWORD
++  #define WIFI_PASSWORD ""
++#endif
++
+ #ifndef SERVER_RESPONSE_DELAY
+   #define SERVER_RESPONSE_DELAY 300
+ #endif
