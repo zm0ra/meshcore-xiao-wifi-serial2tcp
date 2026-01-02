@@ -1,37 +1,63 @@
 diff --git a/examples/simple_repeater/MyMesh.cpp b/examples/simple_repeater/MyMesh.cpp
-index 84a9f84..d5d4d82 100644
+index 4214c2f..6ee7830 100644
 --- a/examples/simple_repeater/MyMesh.cpp
 +++ b/examples/simple_repeater/MyMesh.cpp
-@@ -889,10 +889,14 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondClock
-   region_load_active = false;
- #if defined(ESP32)
-   _raw_packet_server = NULL;
-+  _console_server = NULL;
-+  _console_cmd_len = 0;
-+  _console_cmd[0] = 0;
-   for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
-     _raw_rx_pos[i] = 0;
-   }
- #endif
-@@ -446,7 +450,7 @@ void MyMesh::logTxFail(mesh::Packet *pkt, int len) {
+@@ -451,30 +451,102 @@ void MyMesh::logTxFail(mesh::Packet *pkt, int len) {
  
  #if defined(ESP32)
  void MyMesh::initTcpBridge() {
 -  if (_raw_packet_server) return;
 +  if (_raw_packet_server && _console_server) return;
    if (strlen(WIFI_SSID) == 0) return;  // no WiFi credentials provided
-@@ -471,6 +475,15 @@ void MyMesh::initTcpBridge() {
-   _raw_packet_server->begin();
-   _raw_packet_server->setNoDelay(true);
-   Serial.printf("[TCP] Raw packet server started on %s:%d\n", WiFi.localIP().toString().c_str(), TCP_PORT);
+ 
+   WiFi.mode(WIFI_STA);
+-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
++  if (WiFi.status() != WL_CONNECTED) {
++    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 +
++    unsigned long start = millis();
++    while (WiFi.status() != WL_CONNECTED && (millis() - start) < 15000) {
++      delay(100);
++    }
+ 
+-  unsigned long start = millis();
+-  while (WiFi.status() != WL_CONNECTED && (millis() - start) < 15000) {
+-    delay(100);
+-  }
+-
+-  if (WiFi.status() != WL_CONNECTED) {
+-    Serial.println("[TCP] WiFi connect failed");
+-    return;
++    if (WiFi.status() != WL_CONNECTED) {
++      Serial.println("[TCP] WiFi connect failed");
++      return;
++    }
+   }
+ 
+-  for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
+-    _raw_rx_pos[i] = 0;
++  if (!_raw_packet_server) {
++    for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
++      _raw_rx_pos[i] = 0;
++    }
++
++    _raw_packet_server = new WiFiServer(TCP_PORT);
++    _raw_packet_server->begin();
++    _raw_packet_server->setNoDelay(true);
++    Serial.printf("[TCP] Raw packet server started on %s:%d\n", WiFi.localIP().toString().c_str(), TCP_PORT);
+   }
+ 
+-  _raw_packet_server = new WiFiServer(TCP_PORT);
+-  _raw_packet_server->begin();
+-  _raw_packet_server->setNoDelay(true);
+-  Serial.printf("[TCP] Raw packet server started on %s:%d\n", WiFi.localIP().toString().c_str(), TCP_PORT);
 +  if (!_console_server) {
 +    _console_server = new WiFiServer(CONSOLE_PORT);
 +    _console_server->begin();
 +    _console_server->setNoDelay(true);
 +    Serial.printf("[CONSOLE] TCP console started on %s:%d\n", WiFi.localIP().toString().c_str(), CONSOLE_PORT);
 +  }
- }
++}
 +
 +void MyMesh::handleConsoleServer() {
 +  if (_console_server == NULL) return;
@@ -54,7 +80,6 @@ index 84a9f84..d5d4d82 100644
 +    if (c < 0) break;
 +    char ch = (char)c;
 +
-+    // Handle backspace/delete
 +    if (ch == '\b' || ch == 0x7F) {
 +      if (_console_cmd_len > 0) {
 +        _console_cmd_len--;
@@ -64,7 +89,6 @@ index 84a9f84..d5d4d82 100644
 +      continue;
 +    }
 +
-+    // Ignore LF
 +    if (ch == '\n') continue;
 +
 +    if (_console_cmd_len < (int)sizeof(_console_cmd) - 1 && ch != '\r') {
@@ -73,7 +97,6 @@ index 84a9f84..d5d4d82 100644
 +      _console_client.write((uint8_t)ch);
 +    }
 +
-+    // End of line (CR) or buffer full
 +    if (ch == '\r' || _console_cmd_len == (int)sizeof(_console_cmd) - 1) {
 +      _console_client.print("\r\n");
 +
@@ -95,10 +118,25 @@ index 84a9f84..d5d4d82 100644
 +      _console_client.print("> ");
 +    }
 +  }
-+}
-@@ -1299,11 +1337,14 @@ void MyMesh::loop() {
+ }
+ 
+ void MyMesh::handleRawPacketServer() {
+@@ -904,6 +976,9 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
+   region_load_active = false;
  #if defined(ESP32)
-   if (!_raw_packet_server) {
+   _raw_packet_server = NULL;
++  _console_server = NULL;
++  _console_cmd_len = 0;
++  _console_cmd[0] = 0;
+   for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
+     _raw_rx_pos[i] = 0;
+   }
+@@ -1306,12 +1381,15 @@ void MyMesh::loop() {
+   mesh::Mesh::loop();
+ 
+ #if defined(ESP32)
+-  if (!_raw_packet_server) {
++  if (!_raw_packet_server || !_console_server) {
      initTcpBridge();
    }
    if (_raw_packet_server) {
@@ -110,5 +148,3 @@ index 84a9f84..d5d4d82 100644
  #endif
  
    if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {
-     mesh::Packet *pkt = createSelfAdvert();
-     if (pkt) sendFlood(pkt);

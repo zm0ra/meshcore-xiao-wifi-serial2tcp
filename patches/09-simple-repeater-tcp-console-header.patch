@@ -1,36 +1,40 @@
 diff --git a/examples/simple_repeater/MyMesh.h b/examples/simple_repeater/MyMesh.h
-index 8c775c0..5c78bd9 100644
+index 46a8536..464a1d2 100644
 --- a/examples/simple_repeater/MyMesh.h
 +++ b/examples/simple_repeater/MyMesh.h
-@@ -48,6 +48,10 @@
- #ifndef TCP_PORT
+@@ -51,6 +51,10 @@
  #define TCP_PORT 5002
  #endif
-+
+ 
 +#ifndef CONSOLE_PORT
 +#define CONSOLE_PORT 5001
 +#endif
-@@ -126,6 +130,10 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
- #if defined(ESP32)
-   WiFiServer* _raw_packet_server;
-   WiFiClient  _raw_packet_clients[MAX_TCP_CLIENTS];
-   uint8_t     _raw_rx_buffer[MAX_TCP_CLIENTS][512];
-   int         _raw_rx_pos[MAX_TCP_CLIENTS];
++
+ #ifndef MAX_TCP_CLIENTS
+ #define MAX_TCP_CLIENTS 4
+ #endif
+@@ -131,6 +135,12 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
+  WiFiClient  _raw_packet_clients[MAX_TCP_CLIENTS];
+  uint8_t     _raw_rx_buffer[MAX_TCP_CLIENTS][512];
+  int         _raw_rx_pos[MAX_TCP_CLIENTS];
++
 +
 +  WiFiServer* _console_server;
 +  WiFiClient  _console_client;
 +  char        _console_cmd[160];
 +  int         _console_cmd_len;
  #endif
-@@ -191,6 +199,7 @@ protected:
+ #if defined(WITH_RS232_BRIDGE)
+  RS232Bridge bridge;
+@@ -192,6 +202,7 @@ protected:
  #if defined(ESP32)
-   void initTcpBridge();
-   void handleRawPacketServer();
+  void initTcpBridge();
+  void handleRawPacketServer();
 +  void handleConsoleServer();
-   bool parseRS232BridgePacket(const uint8_t* buffer, int len, int client_idx);
-   void sendPacketToTcpClients(const uint8_t* payload, int len);
-   void sendRS232BridgeFrameToTcp(const uint8_t* payload, int len);
-   void displayReceivedPacket(const uint8_t* payload, int len);
-   void logPacketSummary(const uint8_t* payload, int len, const char* direction);
-   void dumpHexLine(const uint8_t* data, int len);
+  bool parseRS232BridgePacket(const uint8_t* buffer, int len, int client_idx);
+  void sendPacketToTcpClients(const uint8_t* payload, int len);
+  void sendRS232BridgeFrameToTcp(const uint8_t* payload, int len);
+  void displayReceivedPacket(const uint8_t* payload, int len);
+  void logPacketSummary(const uint8_t* payload, int len, const char* direction);
+  void dumpHexLine(const uint8_t* data, int len);
  #endif
