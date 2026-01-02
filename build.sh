@@ -321,6 +321,51 @@ navigate_to_firmware_source() {
     fi
 }
 
+ensure_repeater_env_build_flags() {
+    local config_file="$1"
+
+    # Only relevant if the env exists
+    if ! grep -q '^\[env:Xiao_S3_WIO_repeater\]$' "$config_file"; then
+        return 0
+    fi
+
+    # If the repeater env already contains WiFi flags, do nothing
+    if awk '
+        BEGIN { in_env=0 }
+        /^\[env:Xiao_S3_WIO_repeater\]$/ { in_env=1; next }
+        in_env && /^\[/ { in_env=0 }
+        in_env && /-D[[:space:]]+WIFI_SSID=/ { found=1 }
+        END { exit(found ? 0 : 1) }
+    ' "$config_file"; then
+        return 0
+    fi
+
+    log_info "Injecting missing repeater WiFi/LORA build_flags into variants/xiao_s3_wio/platformio.ini..."
+
+    local tmp_file
+    tmp_file="${config_file}.tmp"
+
+    awk '
+        BEGIN { in_env=0; inserted=0 }
+        /^\[env:Xiao_S3_WIO_repeater\]$/ { in_env=1 }
+        in_env && /^\[/ && $0 !~ /^\[env:Xiao_S3_WIO_repeater\]$/ { in_env=0 }
+        { print }
+        in_env && !inserted && $0 ~ /^[[:space:]]*\$\{Xiao_S3_WIO\.build_flags\}[[:space:]]*$/ {
+            print "  -D WIFI_SSID=\x27\"YourNetwork\"\x27"
+            print "  -D WIFI_PWD=\x27\"YourPassword\"\x27"
+            print "  -D WIFI_PASSWORD=\x27\"YourPassword\"\x27"
+            print "  -D TCP_PORT=5002"
+            print "  -D WIFI_DEBUG_LOGGING=1"
+            print "  -D GUEST_PASSWORD=\x27\"guest\"\x27"
+            print "  -D LORA_FREQ=869.618"
+            print "  -D LORA_BW=62.5"
+            print "  -D LORA_SF=8"
+            print "  -D LORA_CR=5"
+            inserted=1
+        }
+    ' "$config_file" > "$tmp_file" && mv "$tmp_file" "$config_file"
+}
+
 configure_build_flags() {
     log_info "Configuring build flags (platformio.ini)..."
 
@@ -335,6 +380,9 @@ configure_build_flags() {
     if [ ! -f "${config_file}.orig" ]; then
         cp "$config_file" "${config_file}.orig"
     fi
+
+    # Ensure the repeater env contains the flags we later substitute via sed.
+    ensure_repeater_env_build_flags "$config_file"
 
     # WiFi
     sed -i.bak "s|-D WIFI_SSID='\"[^\"]*\"'|-D WIFI_SSID='\"${WIFI_SSID}\"'|" "$config_file"
