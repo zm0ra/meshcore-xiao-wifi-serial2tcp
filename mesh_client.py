@@ -138,6 +138,11 @@ def read_rs232_frame(sock):
     if len(checksum) < 2:
         return None
     
+    # Skip newline delimiter (device sends \n after checksum)
+    newline = sock.recv(1)
+    if newline and newline != b'\n':
+        print(f"[!] Warning: expected newline, got {newline.hex()}")
+    
     # Verify
     calc = fletcher16(packet)
     if calc != checksum:
