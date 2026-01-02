@@ -305,6 +305,10 @@ apply_patches() {
 navigate_to_firmware_source() {
     log_info "Preparing firmware source for role: ${BUILD_ROLE}..."
     cd "$REPO_DIR"
+    
+    # Apply patches for both companion and repeater
+    apply_patches
+    
     if [ "$BUILD_ROLE" = "repeater" ]; then
         if [ ! -d "examples/simple_repeater" ]; then
             log_error "Repeater firmware not found at examples/simple_repeater"
@@ -313,8 +317,6 @@ navigate_to_firmware_source() {
         cd "examples/simple_repeater"
         log_success "Ready to build repeater from examples/simple_repeater"
     else
-        cd "$REPO_DIR"
-        apply_patches
         log_success "Ready to build companion"
     fi
 }
