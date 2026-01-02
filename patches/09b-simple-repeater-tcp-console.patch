@@ -1,0 +1,114 @@
+diff --git a/examples/simple_repeater/MyMesh.cpp b/examples/simple_repeater/MyMesh.cpp
+index 84a9f84..d5d4d82 100644
+--- a/examples/simple_repeater/MyMesh.cpp
++++ b/examples/simple_repeater/MyMesh.cpp
+@@ -889,10 +889,14 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondClock
+   region_load_active = false;
+ #if defined(ESP32)
+   _raw_packet_server = NULL;
++  _console_server = NULL;
++  _console_cmd_len = 0;
++  _console_cmd[0] = 0;
+   for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
+     _raw_rx_pos[i] = 0;
+   }
+ #endif
+@@ -446,7 +450,7 @@ void MyMesh::logTxFail(mesh::Packet *pkt, int len) {
+ 
+ #if defined(ESP32)
+ void MyMesh::initTcpBridge() {
+-  if (_raw_packet_server) return;
++  if (_raw_packet_server && _console_server) return;
+   if (strlen(WIFI_SSID) == 0) return;  // no WiFi credentials provided
+@@ -471,6 +475,15 @@ void MyMesh::initTcpBridge() {
+   _raw_packet_server->begin();
+   _raw_packet_server->setNoDelay(true);
+   Serial.printf("[TCP] Raw packet server started on %s:%d\n", WiFi.localIP().toString().c_str(), TCP_PORT);
++
++  if (!_console_server) {
++    _console_server = new WiFiServer(CONSOLE_PORT);
++    _console_server->begin();
++    _console_server->setNoDelay(true);
++    Serial.printf("[CONSOLE] TCP console started on %s:%d\n", WiFi.localIP().toString().c_str(), CONSOLE_PORT);
++  }
+ }
++
++void MyMesh::handleConsoleServer() {
++  if (_console_server == NULL) return;
++
++  if (!_console_client.connected()) {
++    if (_console_client) _console_client.stop();
++    WiFiClient incoming = _console_server->available();
++    if (incoming) {
++      _console_client = incoming;
++      _console_cmd_len = 0;
++      _console_cmd[0] = 0;
++      _console_client.print("MeshCore repeater console\r\n> ");
++      Serial.println("[CONSOLE] Client connected");
++    }
++    return;
++  }
++
++  while (_console_client.available()) {
++    int c = _console_client.read();
++    if (c < 0) break;
++    char ch = (char)c;
++
++    // Handle backspace/delete
++    if (ch == '\b' || ch == 0x7F) {
++      if (_console_cmd_len > 0) {
++        _console_cmd_len--;
++        _console_cmd[_console_cmd_len] = 0;
++        _console_client.print("\b \b");
++      }
++      continue;
++    }
++
++    // Ignore LF
++    if (ch == '\n') continue;
++
++    if (_console_cmd_len < (int)sizeof(_console_cmd) - 1 && ch != '\r') {
++      _console_cmd[_console_cmd_len++] = ch;
++      _console_cmd[_console_cmd_len] = 0;
++      _console_client.write((uint8_t)ch);
++    }
++
++    // End of line (CR) or buffer full
++    if (ch == '\r' || _console_cmd_len == (int)sizeof(_console_cmd) - 1) {
++      _console_client.print("\r\n");
++
++      char reply[160];
++      reply[0] = 0;
++
++      if (_console_cmd_len > 0) {
++        handleCommand(0, _console_cmd, reply);
++      }
++
++      if (reply[0]) {
++        _console_client.print("  -> ");
++        _console_client.print(reply);
++        _console_client.print("\r\n");
++      }
++
++      _console_cmd_len = 0;
++      _console_cmd[0] = 0;
++      _console_client.print("> ");
++    }
++  }
++}
+@@ -1299,11 +1337,14 @@ void MyMesh::loop() {
+ #if defined(ESP32)
+   if (!_raw_packet_server) {
+     initTcpBridge();
+   }
+   if (_raw_packet_server) {
+     handleRawPacketServer();
+   }
++  if (_console_server) {
++    handleConsoleServer();
++  }
+ #endif
+ 
+   if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {
+     mesh::Packet *pkt = createSelfAdvert();
+     if (pkt) sendFlood(pkt);
