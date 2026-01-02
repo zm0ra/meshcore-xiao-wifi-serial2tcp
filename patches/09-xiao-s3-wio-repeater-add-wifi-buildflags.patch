@@ -2,7 +2,7 @@ diff --git a/variants/xiao_s3_wio/platformio.ini b/variants/xiao_s3_wio/platform
 index 39a842c..1c0bced 100644
 --- a/variants/xiao_s3_wio/platformio.ini
 +++ b/variants/xiao_s3_wio/platformio.ini
-@@ -41,12 +41,21 @@ build_src_filter = ${Xiao_S3_WIO.build_src_filter}
+@@ -41,12 +41,22 @@ build_src_filter = ${Xiao_S3_WIO.build_src_filter}
  build_flags =
     ${Xiao_S3_WIO.build_flags}
 +  -D WIFI_SSID='"WiFiNetwork"'
