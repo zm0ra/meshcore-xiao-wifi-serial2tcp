@@ -1,0 +1,27 @@
+diff --git a/variants/xiao_s3_wio/platformio.ini b/variants/xiao_s3_wio/platformio.ini
+index 39a842c..1c0bced 100644
+--- a/variants/xiao_s3_wio/platformio.ini
++++ b/variants/xiao_s3_wio/platformio.ini
+@@ -41,12 +41,21 @@ build_src_filter = ${Xiao_S3_WIO.build_src_filter}
+ build_flags =
+   ${Xiao_S3_WIO.build_flags}
++  -D WIFI_SSID='"WiFiNetwork"'
++  -D WIFI_PWD='"WiFiPassword"'
++  -D WIFI_PASSWORD='"WiFiPassword"'
++  -D TCP_PORT=5002
++  -D WIFI_DEBUG_LOGGING=1
+   -D ADVERT_NAME='"XiaoS3 Repeater"'
+   -D ADVERT_LAT=0.0
+   -D ADVERT_LON=0.0
+   -D ADMIN_PASSWORD='"password"'
++  -D GUEST_PASSWORD='"guest"'
++  -D LORA_FREQ=869.618
++  -D LORA_BW=62.5
++  -D LORA_SF=8
++  -D LORA_CR=5
+   -D MAX_NEIGHBOURS=50
+ ;  -D MESH_PACKET_LOGGING=1
+ ;  -D MESH_DEBUG=1
+ lib_deps =
+   ${Xiao_S3_WIO.lib_deps}
+   ${esp32_ota.lib_deps}

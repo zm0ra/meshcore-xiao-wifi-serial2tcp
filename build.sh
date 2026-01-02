@@ -339,6 +339,7 @@ configure_build_flags() {
     # WiFi
     sed -i.bak "s|-D WIFI_SSID='\"[^\"]*\"'|-D WIFI_SSID='\"${WIFI_SSID}\"'|" "$config_file"
     sed -i.bak "s|-D WIFI_PWD='\"[^\"]*\"'|-D WIFI_PWD='\"${WIFI_PASSWORD}\"'|" "$config_file"
+    sed -i.bak "s|-D WIFI_PASSWORD='\"[^\"]*\"'|-D WIFI_PASSWORD='\"${WIFI_PASSWORD}\"'|" "$config_file"
     sed -i.bak "s|-D TCP_PORT=[^ ]*|-D TCP_PORT=${TCP_PORT}|" "$config_file"
     sed -i.bak "s|-D WIFI_DEBUG_LOGGING=[^ ]*|-D WIFI_DEBUG_LOGGING=${WIFI_DEBUG_LOGGING}|" "$config_file"
 
@@ -578,11 +579,9 @@ main() {
     [ $DO_CLONE -eq 1 ] && clone_repository
     [ $DO_PATCH -eq 1 ] && navigate_to_firmware_source
     if [ $DO_CONFIGURE -eq 1 ]; then
-        if [ "$BUILD_ROLE" = "repeater" ]; then
-            configure_repeater_build_flags
-        else
-            configure_build_flags
-        fi
+        # For both roles, we configure the main PlatformIO env definitions.
+        # The repeater build uses env:Xiao_S3_WIO_repeater from variants/xiao_s3_wio/platformio.ini.
+        configure_build_flags
     fi
     [ $DO_BUILD -eq 1 ] && build_firmware
     [ $DO_UPLOAD -eq 1 ] && upload_firmware
