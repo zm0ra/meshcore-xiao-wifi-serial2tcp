@@ -2,7 +2,7 @@ diff --git a/examples/simple_repeater/MyMesh.cpp b/examples/simple_repeater/MyMe
 index 4214c2f..6ee7830 100644
 --- a/examples/simple_repeater/MyMesh.cpp
 +++ b/examples/simple_repeater/MyMesh.cpp
-@@ -451,30 +451,102 @@ void MyMesh::logTxFail(mesh::Packet *pkt, int len) {
+@@ -451,30 +451,107 @@ void MyMesh::logTxFail(mesh::Packet *pkt, int len) {
  
  #if defined(ESP32)
  void MyMesh::initTcpBridge() {
