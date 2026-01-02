@@ -1,0 +1,31 @@
+diff --git a/examples/simple_repeater/platformio.ini b/examples/simple_repeater/platformio.ini
+new file mode 100644
+index 0000000..e35c986
+--- /dev/null
++++ b/examples/simple_repeater/platformio.ini
+@@ -0,0 +1,25 @@
++[env:Xiao_S3_WIO_repeater]
++extends = Xiao_S3_WIO
++build_src_filter = ${Xiao_S3_WIO.build_src_filter}
++  +<../examples/simple_repeater/*.cpp>
++
++; Build flags for WiFi + TCP bridge repeater
++build_flags =
++  ${Xiao_S3_WIO.build_flags}
++  -D WIFI_SSID=\"WiFiNetwork\"
++  -D WIFI_PWD=\"WiFiPassword\"
++  -D TCP_PORT=5002
++  -D ADMIN_PASSWORD=\"changeme\"
++  -D GUEST_PASSWORD=\"guest\"
++  -D ADVERT_NAME=\"XiaoS3 Repeater\"
++  -D ADVERT_LAT=0.0
++  -D ADVERT_LON=0.0
++  -D LORA_FREQ=869.618
++  -D LORA_BW=62.5
++  -D LORA_SF=8
++  -D LORA_CR=5
++  -D LORA_TX_POWER=22
++  -D MAX_NEIGHBOURS=50
++  -D WIFI_DEBUG_LOGGING=1
++  -D MESH_PACKET_LOGGING=1
++  -D MESH_DEBUG=1
