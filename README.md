@@ -1,8 +1,10 @@
 # Xiao S3 WiFi TCP Bridge for MeshCore
 
-Complete build system for MeshCore companion radio firmware that bridges LoRa mesh packets over WiFi TCP.
+Build system for MeshCore firmware on Xiao S3 that bridges LoRa mesh packets over WiFi TCP.
 
-Send and receive mesh packets via standard TCP socket (port 5002) - perfect for remote monitoring, testing, and automation.
+Supports two firmware roles:
+- **Companion radio**: raw packet bridge over TCP (default port 5002)
+- **Repeater**: raw packet bridge (default port 5002) **plus** a remote CLI console over TCP (default port 5001)
 
 ## What Is This?
 
@@ -21,6 +23,7 @@ Send and receive mesh packets via standard TCP socket (port 5002) - perfect for 
 - ✅ Real-time packet inspection
 - ✅ Full LoRa config (frequency, bandwidth, spreading factor, TX power)
 - ✅ Serial monitor integration for debugging
+- ✅ (Repeater) Remote TCP console (port 5001)
 
 ## Prerequisites
 
@@ -56,7 +59,11 @@ UPLOAD_PORT="/dev/ttyUSB0" # Or /dev/cu.usbmodem* on macOS
 ### 3. Build & Upload
 
 ```bash
-./build.sh --upload
+# Companion (default)
+./build.sh --build --upload
+
+# Repeater (enables TCP console on :5001)
+./build.sh --repeater --build --upload
 ```
 
 This will:
@@ -69,8 +76,8 @@ This will:
 
 When upload completes, watch serial monitor for:
 ```
-Raw packet server started on port 5002
-WiFi connected, IP: 192.168.X.X
+[TCP] Raw packet server started on <ip>:5002
+[CONSOLE] TCP console started on <ip>:5001
 ```
 
 ### 4. Connect & Test
@@ -86,7 +93,12 @@ nc -v 192.168.X.X 5002
 
 # Option C: Send raw packet with netcat
 echo -ne "\xC0\x3E\x00\x05HELLO" | nc 192.168.X.X 5002
+
+# (Repeater) TCP console
+nc -v 192.168.X.X 5001
 ```
+
+TCP console is line-based and accepts both CRLF and LF-only (so plain `nc` works). After connecting you should see a prompt (`> `). Try `help` / `ver` depending on your MeshCore CLI.
 
 In Python client, use commands:
 ```
@@ -156,6 +168,7 @@ All config.env options:
 | **WiFi** | WIFI_SSID | YourNetwork | Network name |
 | | WIFI_PASSWORD | YourPassword | Network password |
 | | TCP_PORT | 5002 | Bridge listen port |
+| | (Repeater) CONSOLE_PORT | 5001 | TCP CLI console port (compile-time; default is 5001) |
 | | WIFI_DEBUG_LOGGING | 1 | Log WiFi events to serial |
 | **LoRa** | LORA_FREQ | 869.618 | Center frequency (MHz) - adjust for your region |
 | | LORA_BW | 62.5 | Bandwidth (kHz) |
@@ -179,6 +192,10 @@ All config.env options:
 - USB raw RX is mirrored to TCP using RS232Bridge framing (USB/TCP symmetry)
 - Logging helpers to summarize packets and hex-dump payloads
 
+### 3. (Repeater) TCP Console
+- Adds a second TCP server on port 5001 for a simple line-based console
+- Executes commands via the existing MeshCore CLI handler and returns replies
+
 ## Architecture
 
 ```
@@ -191,6 +208,8 @@ All config.env options:
                                          ┌──────────────┐
                                          │ Mesh Network │
                                          └──────────────┘
+
+(Repeater mode also exposes TCP:5001 for a CLI console.)
 ```
 
 ## Testing
@@ -214,9 +233,13 @@ Notes for sending packets with `mesh_client.py`:
 - Device adds a trailing `\n` to each TCP frame; the input parser ignores `\r`/`\n` and rejects non-RS232Bridge frames. Multiple TCP clients can connect; frames are broadcast to all connected peers.
 - To watch traffic live: `./build.sh --build --upload --monitor` (or `--upload --monitor` if firmware is already built) and look for the DHCP IP before connecting the client.
 
-## Configuration Reference
+### Repeater console (port 5001)
 
-Pełna lista konfigurowalnych flag jest w tabeli „Configurable Build Flags (config.env)” powyżej.
+```bash
+nc <device-ip> 5001
+```
+
+You should see `> ` and can type CLI commands (e.g. `help`).
 
 ## Troubleshooting
 
