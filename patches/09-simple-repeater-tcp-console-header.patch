@@ -14,9 +14,9 @@ index 46a8536..464a1d2 100644
  #define MAX_TCP_CLIENTS 4
  #endif
 @@ -131,6 +135,12 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
-  WiFiClient  _raw_packet_clients[MAX_TCP_CLIENTS];
-  uint8_t     _raw_rx_buffer[MAX_TCP_CLIENTS][512];
-  int         _raw_rx_pos[MAX_TCP_CLIENTS];
+    WiFiClient  _raw_packet_clients[MAX_TCP_CLIENTS];
+    uint8_t     _raw_rx_buffer[MAX_TCP_CLIENTS][512];
+    int         _raw_rx_pos[MAX_TCP_CLIENTS];
 +
 +
 +  WiFiServer* _console_server;
@@ -28,8 +28,8 @@ index 46a8536..464a1d2 100644
   RS232Bridge bridge;
 @@ -192,6 +202,7 @@ protected:
  #if defined(ESP32)
-  void initTcpBridge();
-  void handleRawPacketServer();
+    void initTcpBridge();
+    void handleRawPacketServer();
 +  void handleConsoleServer();
   bool parseRS232BridgePacket(const uint8_t* buffer, int len, int client_idx);
   void sendPacketToTcpClients(const uint8_t* payload, int len);
