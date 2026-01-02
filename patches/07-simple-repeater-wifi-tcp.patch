@@ -1,0 +1,294 @@
+--- a/examples/simple_repeater/MyMesh.cpp	2026-01-02 13:32:43
++++ b/examples/simple_repeater/MyMesh.cpp	2026-01-02 13:32:43
+@@ -1,5 +1,6 @@
+ #include "MyMesh.h"
+ #include <algorithm>
++#include <cstring>
+ 
+ /* ------------------------------ Config -------------------------------- */
+ 
+@@ -54,6 +55,18 @@
+ #define CLI_REPLY_DELAY_MILLIS      600
+ 
+ #define LAZY_CONTACTS_WRITE_DELAY    5000
++
++#if defined(ESP32)
++static uint16_t fletcher16(const uint8_t* data, size_t len) {
++  uint16_t sum1 = 0;
++  uint16_t sum2 = 0;
++  for (size_t i = 0; i < len; i++) {
++    sum1 = (sum1 + data[i]) % 255;
++    sum2 = (sum2 + sum1) % 255;
++  }
++  return (sum2 << 8) | sum1;
++}
++#endif
+ 
+ void MyMesh::putNeighbour(const mesh::Identity &id, uint32_t timestamp, float snr) {
+ #if MAX_NEIGHBOURS // check if neighbours enabled
+@@ -336,12 +349,29 @@
+   mesh::Utils::printHex(Serial, raw, len);
+   Serial.println();
+ #endif
++#if defined(ESP32)
++  if (_raw_packet_server) {
++    sendRS232BridgeFrameToTcp(raw, len);
++    logPacketSummary(raw, len, "TCP TX (raw)");
++  }
++#endif
+ }
+ 
+ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
+ #ifdef WITH_BRIDGE
+   if (_prefs.bridge_pkt_src == 1) {
+     bridge.sendPacket(pkt);
++  }
++#endif
++
++#if defined(ESP32)
++  if (_raw_packet_server) {
++    uint8_t buffer[MAX_TRANS_UNIT + 4];
++    int payload_len = pkt->writeTo(buffer);
++    if (payload_len > 0) {
++      sendRS232BridgeFrameToTcp(buffer, payload_len);
++      logPacketSummary(buffer, payload_len, "TCP TX (RX)");
++    }
+   }
+ #endif
+ 
+@@ -371,6 +401,17 @@
+   }
+ #endif
+ 
++#if defined(ESP32)
++  if (_raw_packet_server) {
++    uint8_t buffer[MAX_TRANS_UNIT + 4];
++    int payload_len = pkt->writeTo(buffer);
++    if (payload_len > 0) {
++      sendRS232BridgeFrameToTcp(buffer, payload_len);
++      logPacketSummary(buffer, payload_len, "TCP TX (TX)");
++    }
++  }
++#endif
++
+   if (_logging) {
+     File f = openAppend(PACKET_LOG_FILE);
+     if (f) {
+@@ -397,10 +438,188 @@
+       f.printf(": TX FAIL!, len=%d (type=%d, route=%s, payload_len=%d)\n", len, pkt->getPayloadType(),
+                pkt->isRouteDirect() ? "D" : "F", pkt->payload_len);
+       f.close();
++    }
++  }
++}
++
++#if defined(ESP32)
++void MyMesh::initTcpBridge() {
++  if (_raw_packet_server) return;
++  if (strlen(WIFI_SSID) == 0) return;  // no WiFi credentials provided
++
++  WiFi.mode(WIFI_STA);
++  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
++
++  unsigned long start = millis();
++  while (WiFi.status() != WL_CONNECTED && (millis() - start) < 15000) {
++    delay(100);
++  }
++
++  if (WiFi.status() != WL_CONNECTED) {
++    Serial.println("[TCP] WiFi connect failed");
++    return;
++  }
++
++  for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
++    _raw_rx_pos[i] = 0;
++  }
++
++  _raw_packet_server = new WiFiServer(TCP_PORT);
++  _raw_packet_server->begin();
++  _raw_packet_server->setNoDelay(true);
++  Serial.printf("[TCP] Raw packet server started on %s:%d\n", WiFi.localIP().toString().c_str(), TCP_PORT);
++}
++
++void MyMesh::handleRawPacketServer() {
++  if (_raw_packet_server == NULL) return;
++
++  WiFiClient incoming = _raw_packet_server->available();
++  if (incoming) {
++    int free_idx = -1;
++    for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
++      if (!_raw_packet_clients[i].connected()) {
++        _raw_packet_clients[i].stop();
++        free_idx = i;
++        break;
++      }
++    }
++    if (free_idx >= 0) {
++      _raw_packet_clients[free_idx] = incoming;
++      _raw_rx_pos[free_idx] = 0;
++      Serial.printf("[TCP] Client connected (%d)\n", free_idx);
++    } else {
++      incoming.stop();
++    }
++  }
++
++  for (int idx = 0; idx < MAX_TCP_CLIENTS; idx++) {
++    auto &client = _raw_packet_clients[idx];
++    if (!client.connected()) {
++      if (_raw_rx_pos[idx]) _raw_rx_pos[idx] = 0;
++      continue;
++    }
++
++    while (client.available()) {
++      int c = client.read();
++      if (c < 0) break;
++      uint8_t b = (uint8_t)c;
++
++      // ignore delimiters
++      if (b == '\n' || b == '\r') {
++        continue;
++      }
++
++      if (_raw_rx_pos[idx] >= (int)sizeof(_raw_rx_buffer[idx])) {
++        _raw_rx_pos[idx] = 0; // overflow protection
++        continue;
++      }
++
++      _raw_rx_buffer[idx][_raw_rx_pos[idx]++] = b;
++
++      if (_raw_rx_pos[idx] >= 4) {
++        uint16_t payload_len = ((uint16_t)_raw_rx_buffer[idx][2] << 8) | _raw_rx_buffer[idx][3];
++        if (payload_len > (MAX_TRANS_UNIT + 1)) {
++          _raw_rx_pos[idx] = 0;
++          continue;
++        }
++
++        int needed = 4 + payload_len + 2; // header + payload + checksum
++
++        if (_raw_rx_pos[idx] < needed) {
++          continue; // not enough yet
++        }
++
++        bool ok = parseRS232BridgePacket(_raw_rx_buffer[idx], _raw_rx_pos[idx], idx);
++        _raw_rx_pos[idx] = 0;
++        if (!ok) {
++          // drop and reset
++          continue;
++        }
++      }
++    }
++  }
++}
++
++bool MyMesh::parseRS232BridgePacket(const uint8_t* buffer, int len, int client_idx) {
++  if (len < 6) return false;
++  if (buffer[0] != 0xC0 || buffer[1] != 0x3E) return false;
++
++  uint16_t payload_len = ((uint16_t)buffer[2] << 8) | buffer[3];
++  int needed = 4 + payload_len + 2; // header + payload + checksum
++
++  if (payload_len > (MAX_TRANS_UNIT + 1)) return false;
++  if (len < needed) return false;
++  if (len > needed && buffer[needed] != '\n') return false; // allow optional trailing newline only
++
++  uint16_t rx_checksum = ((uint16_t)buffer[4 + payload_len] << 8) | buffer[5 + payload_len];
++  uint16_t calc_checksum = fletcher16(buffer + 4, payload_len);
++  if (rx_checksum != calc_checksum) {
++    Serial.printf("[TCP] Bad checksum from client %d (got 0x%04X, want 0x%04X)\n", client_idx, rx_checksum, calc_checksum);
++    return false;
++  }
++
++  mesh::Packet* pkt = _mgr->allocNew();
++  if (!pkt) {
++    Serial.println("[TCP] Failed to alloc packet");
++    return false;
++  }
++  if (!pkt->readFrom(buffer + 4, payload_len)) {
++    _mgr->free(pkt);
++    Serial.println("[TCP] Failed to parse packet");
++    return false;
++  }
++
++  displayReceivedPacket(buffer + 4, payload_len);
++  sendFlood(pkt);
++  return true;
++}
++
++void MyMesh::sendPacketToTcpClients(const uint8_t* payload, int len) {
++  if (!_raw_packet_server) return;
++  sendRS232BridgeFrameToTcp(payload, len);
++}
++
++void MyMesh::sendRS232BridgeFrameToTcp(const uint8_t* payload, int len) {
++  if (!_raw_packet_server) return;
++  uint16_t checksum = fletcher16(payload, len);
++
++  uint8_t header[4] = {0xC0, 0x3E, (uint8_t)(len >> 8), (uint8_t)(len & 0xFF)};
++
++  for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
++    auto &client = _raw_packet_clients[i];
++    if (!client.connected()) {
++      if (client) client.stop();
++      continue;
+     }
++    client.write(header, 4);
++    client.write(payload, len);
++    client.write((uint8_t)((checksum >> 8) & 0xFF));
++    client.write((uint8_t)(checksum & 0xFF));
++    client.write('\n');
+   }
+ }
+ 
++void MyMesh::displayReceivedPacket(const uint8_t* payload, int len) {
++  Serial.printf("[TCP] RX: %d bytes from TCP -> mesh\n", len);
++  dumpHexLine(payload, len);
++}
++
++void MyMesh::logPacketSummary(const uint8_t* payload, int len, const char* direction) {
++  Serial.printf("[TCP] %s: %d bytes\n", direction, len);
++}
++
++void MyMesh::dumpHexLine(const uint8_t* data, int len) {
++  const int width = 16;
++  for (int i = 0; i < len; i += width) {
++    int chunk = std::min(width, len - i);
++    for (int j = 0; j < chunk; j++) {
++      Serial.printf("%02X ", data[i + j]);
++    }
++    Serial.println();
++  }
++}
++#endif
++
+ int MyMesh::calcRxDelay(float score, uint32_t air_time) const {
+   if (_prefs.rx_delay_base <= 0.0f) return 0;
+   return (int)((pow(_prefs.rx_delay_base, 0.85f - score) - 1.0) * air_time);
+@@ -676,6 +895,12 @@
+   set_radio_at = revert_radio_at = 0;
+   _logging = false;
+   region_load_active = false;
++#if defined(ESP32)
++  _raw_packet_server = NULL;
++  for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
++    _raw_rx_pos[i] = 0;
++  }
++#endif
+ 
+ #if MAX_NEIGHBOURS
+   memset(neighbours, 0, sizeof(neighbours));
+@@ -1073,6 +1298,15 @@
+ 
+   mesh::Mesh::loop();
+ 
++#if defined(ESP32)
++  if (!_raw_packet_server) {
++    initTcpBridge();
++  }
++  if (_raw_packet_server) {
++    handleRawPacketServer();
++  }
++#endif
++
+   if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {
+     mesh::Packet *pkt = createSelfAdvert();
+     if (pkt) sendFlood(pkt);

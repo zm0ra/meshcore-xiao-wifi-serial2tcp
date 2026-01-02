@@ -1,0 +1,61 @@
+--- a/examples/simple_repeater/MyMesh.h	2026-01-02 13:32:57
++++ b/examples/simple_repeater/MyMesh.h	2026-01-02 13:32:57
+@@ -35,6 +35,26 @@
+ #include <helpers/RegionMap.h>
+ #include "RateLimiter.h"
+ 
++#ifdef ESP32
++#include <WiFi.h>
++#endif
++
++#ifndef WIFI_SSID
++#define WIFI_SSID ""
++#endif
++
++#ifndef WIFI_PASSWORD
++#define WIFI_PASSWORD ""
++#endif
++
++#ifndef TCP_PORT
++#define TCP_PORT 5002
++#endif
++
++#ifndef MAX_TCP_CLIENTS
++#define MAX_TCP_CLIENTS 4
++#endif
++
+ #ifdef WITH_BRIDGE
+ extern AbstractBridge* bridge;
+ #endif
+@@ -106,6 +126,12 @@
+   uint8_t pending_sf;
+   uint8_t pending_cr;
+   int  matching_peer_indexes[MAX_CLIENTS];
++#if defined(ESP32)
++  WiFiServer* _raw_packet_server;
++  WiFiClient  _raw_packet_clients[MAX_TCP_CLIENTS];
++  uint8_t     _raw_rx_buffer[MAX_TCP_CLIENTS][512];
++  int         _raw_rx_pos[MAX_TCP_CLIENTS];
++#endif
+ #if defined(WITH_RS232_BRIDGE)
+   RS232Bridge bridge;
+ #elif defined(WITH_ESPNOW_BRIDGE)
+@@ -162,6 +188,18 @@
+   bool onPeerPathRecv(mesh::Packet* packet, int sender_idx, const uint8_t* secret, uint8_t* path, uint8_t path_len, uint8_t extra_type, uint8_t* extra, uint8_t extra_len) override;
+   void onControlDataRecv(mesh::Packet* packet) override;
+ 
++  /* TCP bridge helpers (ESP32 only) */
++#if defined(ESP32)
++  void initTcpBridge();
++  void handleRawPacketServer();
++  bool parseRS232BridgePacket(const uint8_t* buffer, int len, int client_idx);
++  void sendPacketToTcpClients(const uint8_t* payload, int len);
++  void sendRS232BridgeFrameToTcp(const uint8_t* payload, int len);
++  void displayReceivedPacket(const uint8_t* payload, int len);
++  void logPacketSummary(const uint8_t* payload, int len, const char* direction);
++  void dumpHexLine(const uint8_t* data, int len);
++#endif
++
+ public:
+   MyMesh(mesh::MainBoard& board, mesh::Radio& radio, mesh::MillisecondClock& ms, mesh::RNG& rng, mesh::RTCClock& rtc, mesh::MeshTables& tables);
+ 
