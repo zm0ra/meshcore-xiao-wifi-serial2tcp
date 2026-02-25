@@ -28,6 +28,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
 WIFI_SSID="YourNetwork"
 WIFI_PASSWORD="YourPassword"
 TCP_PORT=5002
+CONSOLE_PORT=5001
 WIFI_DEBUG_LOGGING=1
 
 # LoRa radio flags
@@ -54,6 +55,11 @@ MESH_PACKET_LOGGING=1
 MESH_DEBUG=1
 BRIDGE_DEBUG=0
 BLE_DEBUG_LOGGING=0
+
+# Build orchestration
+USE_UPSTREAM_BUILD=1
+FIRMWARE_VERSION="dev"
+EXTRA_BUILD_FLAGS=""
 
 # Identity / advertising
 ADVERT_NAME="XiaoS3 WiFi"
@@ -88,6 +94,7 @@ source "$CONFIG_FILE"
 WIFI_SSID="${WIFI_SSID:-YourNetwork}"
 WIFI_PASSWORD="${WIFI_PASSWORD:-YourPassword}"
 TCP_PORT=${TCP_PORT:-5002}
+CONSOLE_PORT=${CONSOLE_PORT:-5001}
 WIFI_DEBUG_LOGGING=${WIFI_DEBUG_LOGGING:-1}
 
 LORA_FREQ=${LORA_FREQ:-869.618}
@@ -110,6 +117,10 @@ MESH_PACKET_LOGGING=${MESH_PACKET_LOGGING:-1}
 MESH_DEBUG=${MESH_DEBUG:-1}
 BRIDGE_DEBUG=${BRIDGE_DEBUG:-0}
 BLE_DEBUG_LOGGING=${BLE_DEBUG_LOGGING:-0}
+
+USE_UPSTREAM_BUILD=${USE_UPSTREAM_BUILD:-1}
+FIRMWARE_VERSION="${FIRMWARE_VERSION:-dev}"
+EXTRA_BUILD_FLAGS="${EXTRA_BUILD_FLAGS:-}"
 
 ADVERT_NAME="${ADVERT_NAME:-XiaoS3 WiFi}"
 ADVERT_LAT=${ADVERT_LAT:-0.0}
@@ -135,6 +146,17 @@ log_warn() {
 
 log_error() {
     echo -e "${RED}[✗]${NC} $1"
+}
+
+enforce_repeater_profile() {
+    if [ "${BUILD_ROLE}" != "repeater" ]; then
+        return
+    fi
+
+    # Keep behaviour aligned with normal repeater, while forcing packet logging
+    # needed for MQTT ingestion from serial console.
+    MESH_PACKET_LOGGING=1
+    log_info "Repeater profile active: forcing MESH_PACKET_LOGGING=1"
 }
 
 validate_config() {
@@ -219,10 +241,11 @@ Firmware Roles:
     --repeater     Build repeater (mesh relay with admin interface)
 
 Steps:
-    --build        Clone/patch/configure (unless skipped) and build firmware
+    --build        Clone/patch and build firmware
     --upload       Upload previously built firmware (combine with --build to build+upload)
 
 Options:
+    --clean        Remove WORK_DIR (fresh clone/build state)
     --no-clone     Skip repository cloning (use existing checkout)
     --no-patch     Skip applying patches
     --monitor      Upload and start serial monitor
@@ -230,11 +253,55 @@ Options:
     --help         Show this help
 
 Examples:
+    ./build.sh --clean                             # Remove build workspace
+    ./build.sh --clean --build                     # Fresh clone/patch/config/build
     ./build.sh --build                             # Build companion
     ./build.sh --repeater --build --upload         # Build repeater
     ./build.sh --build --upload                    # Build & upload companion
     ./build.sh --upload                            # Upload existing firmware
 EOF
+}
+
+compose_platformio_build_flags() {
+    local flags="${PLATFORMIO_BUILD_FLAGS:-}"
+
+    flags="${flags} -D WIFI_SSID='\"${WIFI_SSID}\"'"
+    flags="${flags} -D WIFI_PASSWORD='\"${WIFI_PASSWORD}\"'"
+    flags="${flags} -D WIFI_PWD='\"${WIFI_PASSWORD}\"'"
+    flags="${flags} -D TCP_PORT=${TCP_PORT}"
+    flags="${flags} -D CONSOLE_PORT=${CONSOLE_PORT}"
+    flags="${flags} -D WIFI_DEBUG_LOGGING=${WIFI_DEBUG_LOGGING}"
+
+    flags="${flags} -D LORA_FREQ=${LORA_FREQ}"
+    flags="${flags} -D LORA_BW=${LORA_BW}"
+    flags="${flags} -D LORA_SF=${LORA_SF}"
+    flags="${flags} -D LORA_CR=${LORA_CR}"
+    flags="${flags} -D LORA_TX_POWER=${LORA_TX_POWER}"
+
+    flags="${flags} -D MAX_CONTACTS=${MAX_CONTACTS}"
+    flags="${flags} -D MAX_GROUP_CHANNELS=${MAX_GROUP_CHANNELS}"
+    flags="${flags} -D OFFLINE_QUEUE_SIZE=${OFFLINE_QUEUE_SIZE}"
+    flags="${flags} -D MAX_UNREAD_MSGS=${MAX_UNREAD_MSGS}"
+    flags="${flags} -D MAX_BLOBRECS=${MAX_BLOBRECS}"
+    flags="${flags} -D AUTO_OFF_MILLIS=${AUTO_OFF_MILLIS}"
+    flags="${flags} -D UI_RECENT_LIST_SIZE=${UI_RECENT_LIST_SIZE}"
+
+    flags="${flags} -D MESH_PACKET_LOGGING=${MESH_PACKET_LOGGING}"
+    flags="${flags} -D MESH_DEBUG=${MESH_DEBUG}"
+    flags="${flags} -D BRIDGE_DEBUG=${BRIDGE_DEBUG}"
+    flags="${flags} -D BLE_DEBUG_LOGGING=${BLE_DEBUG_LOGGING}"
+
+    flags="${flags} -D ADVERT_NAME='\"${ADVERT_NAME}\"'"
+    flags="${flags} -D ADVERT_LAT=${ADVERT_LAT}"
+    flags="${flags} -D ADVERT_LON=${ADVERT_LON}"
+    flags="${flags} -D ADMIN_PASSWORD='\"${ADMIN_PASSWORD}\"'"
+    flags="${flags} -D GUEST_PASSWORD='\"${GUEST_PASSWORD}\"'"
+
+    if [ -n "${EXTRA_BUILD_FLAGS}" ]; then
+        flags="${flags} ${EXTRA_BUILD_FLAGS}"
+    fi
+
+    echo "${flags}"
 }
 
 check_dependencies() {
@@ -290,24 +357,91 @@ apply_patches() {
     
     cd "$REPO_DIR"
     
-    # Apply each patch, but don't bail if already applied
+    # Apply each patch in non-interactive mode; skip already-applied/reversed patches.
     for patch_file in "$PATCHES_DIR"/*.patch; do
         if [ -f "$patch_file" ]; then
-            log_info "Applying $(basename "$patch_file")..."
-            if ! patch -p1 < "$patch_file"; then
-                log_warn "Patch $(basename "$patch_file") failed (already applied?) - continuing"
+            local patch_name
+            patch_name="$(basename "$patch_file")"
+
+            # Legacy/overlapping patches on recent MeshCore.
+            # 03 duplicates env:Xiao_S3_WIO_companion_radio_wifi in variants/xiao_s3_wio/platformio.ini.
+            if [ "$patch_name" = "03-platformio-xiao-config.patch" ]; then
+                log_info "Skipping ${patch_name} (legacy/optional patch for current upstream)"
+                continue
+            fi
+
+            log_info "Applying ${patch_name}..."
+            if patch -p1 --forward --batch < "$patch_file"; then
+                :
+            else
+                log_warn "Patch ${patch_name} skipped (already applied or not applicable)"
             fi
         fi
     done
     
     log_success "Patches applied"
 }
+
+sanitize_variant_platformio_ini() {
+    local config_file="${REPO_DIR}/variants/xiao_s3_wio/platformio.ini"
+
+    if [ ! -f "$config_file" ]; then
+        return 0
+    fi
+
+    local tmp_file
+    tmp_file="${config_file}.dedup"
+
+    set +e
+    awk '
+        function hdr_name(line,  raw) {
+            raw = line
+            sub(/^\[/, "", raw)
+            sub(/\]$/, "", raw)
+            return raw
+        }
+        /^\[.*\]$/ {
+            name = hdr_name($0)
+            if (seen[name]++) {
+                skip = 1
+                changed = 1
+                next
+            }
+            skip = 0
+            print
+            next
+        }
+        {
+            if (!skip) print
+        }
+        END {
+            if (changed) {
+                exit 42
+            }
+        }
+    ' "$config_file" > "$tmp_file"
+    local awk_status=$?
+    set -e
+
+    if [ $awk_status -eq 42 ]; then
+        mv "$tmp_file" "$config_file"
+        log_warn "Removed duplicate [env:*] sections from variants/xiao_s3_wio/platformio.ini"
+    elif [ $awk_status -eq 0 ]; then
+        rm -f "$tmp_file"
+    else
+        rm -f "$tmp_file"
+        log_error "Failed to sanitize variants/xiao_s3_wio/platformio.ini"
+        exit 1
+    fi
+}
+
 navigate_to_firmware_source() {
     log_info "Preparing firmware source for role: ${BUILD_ROLE}..."
     cd "$REPO_DIR"
     
     # Apply patches for both companion and repeater
     apply_patches
+    sanitize_variant_platformio_ini
     
     if [ "$BUILD_ROLE" = "repeater" ]; then
         if [ ! -d "examples/simple_repeater" ]; then
@@ -465,12 +599,43 @@ build_firmware() {
     log_info "Building firmware for ${PIO_ENV}..."
     
     cd "$REPO_DIR"
+
+    if [[ "$PIO_ENV" == *repeater* ]]; then
+        pio pkg install -e "$PIO_ENV" --library "densaugeo/base64 @ ~1.4.0" >/dev/null 2>&1 || true
+    fi
+
+    local effective_platformio_build_flags
+    effective_platformio_build_flags="$(compose_platformio_build_flags)"
+
+    log_info "PLATFORMIO_BUILD_FLAGS include WiFi/LoRa/Debug/Identity overrides from config.env"
+
+    if [ "${USE_UPSTREAM_BUILD}" = "1" ]; then
+        if [ ! -x "${REPO_DIR}/build.sh" ]; then
+            log_error "Upstream build script not found/executable: ${REPO_DIR}/build.sh"
+            exit 1
+        fi
+
+        log_info "Delegating firmware build to upstream MeshCore build.sh"
+        FIRMWARE_VERSION="${FIRMWARE_VERSION}" \
+        PLATFORMIO_BUILD_FLAGS="${effective_platformio_build_flags}" \
+            bash "${REPO_DIR}/build.sh" build-firmware "${PIO_ENV}"
+
+        local firmware_path
+        firmware_path="${REPO_DIR}/.pio/build/${PIO_ENV}/firmware.bin"
+        if [ ! -f "$firmware_path" ]; then
+            log_error "Upstream build finished without firmware artifact: ${firmware_path}"
+            exit 1
+        fi
+
+        log_success "Firmware built successfully (upstream build.sh)"
+        return
+    fi
     
     # Clean previous build
-    pio run -e "$PIO_ENV" --target clean
+    PLATFORMIO_BUILD_FLAGS="${effective_platformio_build_flags}" pio run -e "$PIO_ENV" --target clean
     
     # Build
-    pio run -e "$PIO_ENV"
+    PLATFORMIO_BUILD_FLAGS="${effective_platformio_build_flags}" pio run -e "$PIO_ENV"
     
     log_success "Firmware built successfully"
 }
@@ -509,16 +674,35 @@ monitor_serial() {
     pio device monitor -p "$port" -b 115200
 }
 
+clean_workspace() {
+    log_info "Cleaning workspace: ${WORK_DIR}"
+
+    if [ -z "$WORK_DIR" ] || [ "$WORK_DIR" = "/" ]; then
+        log_error "Refusing to clean unsafe WORK_DIR value: '${WORK_DIR}'"
+        exit 1
+    fi
+
+    if [ -d "$WORK_DIR" ]; then
+        rm -rf "$WORK_DIR"
+        log_success "Workspace cleaned"
+    else
+        log_info "Workspace directory does not exist, nothing to clean"
+    fi
+}
+
 show_summary() {
     echo
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}                    Build Complete!${NC}"
+    echo -e "${GREEN}                  Operation Complete!${NC}"
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
     echo
     echo -e "Configuration:"
     echo -e "  WiFi SSID:    ${WIFI_SSID}"
     echo -e "  IP Address:   DHCP (check serial log for assigned IP)"
     echo -e "  TCP Port:     ${TCP_PORT}"
+    echo -e "  Console Port: ${CONSOLE_PORT}"
+    echo -e "  Build mode:   $([ "${USE_UPSTREAM_BUILD}" = "1" ] && echo upstream || echo direct pio)"
+    echo -e "  PIO flags:    WiFi/LoRa/Debug/Identity from config.env ${EXTRA_BUILD_FLAGS}"
     echo
     echo -e "Testing:"
     echo -e "  1. Monitor: ${BLUE}pio device monitor -p ${UPLOAD_PORT:-<auto-detect>} -b 115200${NC}"
@@ -538,6 +722,7 @@ main() {
     DO_CLONE=-1
     DO_PATCH=-1
     DO_CONFIGURE=-1
+    DO_CLEAN=0
     DO_BUILD=0
     DO_UPLOAD=0
     DO_MONITOR=0
@@ -556,6 +741,10 @@ main() {
                 ;;
             --build)
                 DO_BUILD=1
+                shift
+                ;;
+            --clean)
+                DO_CLEAN=1
                 shift
                 ;;
             --no-clone)
@@ -592,6 +781,8 @@ main() {
                 ;;
         esac
     done
+
+    enforce_repeater_profile
     
     if [ $DO_BUILD -eq 1 ]; then
         [ $DO_CLONE -eq -1 ] && DO_CLONE=1
@@ -617,18 +808,23 @@ main() {
         fi
     fi
 
+    if [ $DO_CLEAN -eq 1 ] && [ $DO_UPLOAD -eq 1 ] && [ $DO_BUILD -eq 0 ]; then
+        log_error "Cannot use --clean with --upload unless --build is also set"
+        exit 1
+    fi
+
     check_dependencies
     
     # Only validate config if doing something
-    if [ $DO_CLONE -eq 1 ] || [ $DO_PATCH -eq 1 ] || [ $DO_CONFIGURE -eq 1 ] || [ $DO_BUILD -eq 1 ]; then
+    if [ $DO_CLONE -eq 1 ] || [ $DO_PATCH -eq 1 ] || [ $DO_BUILD -eq 1 ]; then
         validate_config
     fi
+
+    [ $DO_CLEAN -eq 1 ] && clean_workspace
     
     [ $DO_CLONE -eq 1 ] && clone_repository
     [ $DO_PATCH -eq 1 ] && navigate_to_firmware_source
     if [ $DO_CONFIGURE -eq 1 ]; then
-        # For both roles, we configure the main PlatformIO env definitions.
-        # The repeater build uses env:Xiao_S3_WIO_repeater from variants/xiao_s3_wio/platformio.ini.
         configure_build_flags
     fi
     [ $DO_BUILD -eq 1 ] && build_firmware
@@ -636,7 +832,9 @@ main() {
     
     show_summary
     
-    [ $DO_MONITOR -eq 1 ] && monitor_serial
+    if [ $DO_MONITOR -eq 1 ]; then
+        monitor_serial
+    fi
 }
 
 # Run

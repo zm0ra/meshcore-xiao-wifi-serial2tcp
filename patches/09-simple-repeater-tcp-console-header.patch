@@ -1,8 +1,6 @@
-diff --git a/examples/simple_repeater/MyMesh.h b/examples/simple_repeater/MyMesh.h
-index 46a8536..464a1d2 100644
---- a/examples/simple_repeater/MyMesh.h
-+++ b/examples/simple_repeater/MyMesh.h
-@@ -51,6 +51,10 @@
+--- a/examples/simple_repeater/MyMesh.h	2026-02-25 12:18:34
++++ b/examples/simple_repeater/MyMesh.h	2026-02-25 12:52:45
+@@ -51,6 +51,14 @@
  #define TCP_PORT 5002
  #endif
  
@@ -10,31 +8,37 @@ index 46a8536..464a1d2 100644
 +#define CONSOLE_PORT 5001
 +#endif
 +
++#ifndef CONSOLE_MIRROR_PORT
++#define CONSOLE_MIRROR_PORT 5003
++#endif
++
  #ifndef MAX_TCP_CLIENTS
  #define MAX_TCP_CLIENTS 4
  #endif
-@@ -131,6 +135,12 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
+@@ -131,6 +139,16 @@
    WiFiClient  _raw_packet_clients[MAX_TCP_CLIENTS];
    uint8_t     _raw_rx_buffer[MAX_TCP_CLIENTS][512];
    int         _raw_rx_pos[MAX_TCP_CLIENTS];
-+
 +
 +  WiFiServer* _console_server;
 +  WiFiClient  _console_client;
 +  char        _console_cmd[160];
 +  int         _console_cmd_len;
++
++  WiFiServer* _console_mirror_server;
++  WiFiClient  _console_mirror_client;
++  char        _console_mirror_cmd[160];
++  int         _console_mirror_cmd_len;
  #endif
  #if defined(WITH_RS232_BRIDGE)
-  RS232Bridge bridge;
-@@ -192,6 +202,7 @@ protected:
+   RS232Bridge bridge;
+@@ -192,6 +210,9 @@
  #if defined(ESP32)
    void initTcpBridge();
    void handleRawPacketServer();
 +  void handleConsoleServer();
++  void handleConsoleMirrorServer();
++  void handleConsoleClientInput(WiFiClient& source, char* cmd_buf, int& cmd_len, bool mirror_to_usb);
    bool parseRS232BridgePacket(const uint8_t* buffer, int len, int client_idx);
    void sendPacketToTcpClients(const uint8_t* payload, int len);
    void sendRS232BridgeFrameToTcp(const uint8_t* payload, int len);
-   void displayReceivedPacket(const uint8_t* payload, int len);
-   void logPacketSummary(const uint8_t* payload, int len, const char* direction);
-   void dumpHexLine(const uint8_t* data, int len);
- #endif

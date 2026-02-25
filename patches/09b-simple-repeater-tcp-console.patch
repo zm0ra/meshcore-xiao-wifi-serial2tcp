@@ -1,41 +1,35 @@
-diff --git a/examples/simple_repeater/MyMesh.cpp b/examples/simple_repeater/MyMesh.cpp
-index 4214c2f..6ee7830 100644
---- a/examples/simple_repeater/MyMesh.cpp
-+++ b/examples/simple_repeater/MyMesh.cpp
-@@ -451,30 +451,107 @@ void MyMesh::logTxFail(mesh::Packet *pkt, int len) {
+--- a/examples/simple_repeater/MyMesh.cpp	2026-02-25 12:18:34
++++ b/examples/simple_repeater/MyMesh.cpp	2026-02-25 12:53:01
+@@ -444,32 +444,159 @@
  
  #if defined(ESP32)
  void MyMesh::initTcpBridge() {
 -  if (_raw_packet_server) return;
-+  if (_raw_packet_server && _console_server) return;
++  if (_raw_packet_server && _console_server && _console_mirror_server) return;
    if (strlen(WIFI_SSID) == 0) return;  // no WiFi credentials provided
  
    WiFi.mode(WIFI_STA);
 -  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 +  if (WiFi.status() != WL_CONNECTED) {
 +    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-+
-+    unsigned long start = millis();
-+    while (WiFi.status() != WL_CONNECTED && (millis() - start) < 15000) {
-+      delay(100);
-+    }
  
 -  unsigned long start = millis();
 -  while (WiFi.status() != WL_CONNECTED && (millis() - start) < 15000) {
 -    delay(100);
--  }
--
--  if (WiFi.status() != WL_CONNECTED) {
--    Serial.println("[TCP] WiFi connect failed");
--    return;
++    unsigned long start = millis();
++    while (WiFi.status() != WL_CONNECTED && (millis() - start) < 15000) {
++      delay(100);
++    }
++
 +    if (WiFi.status() != WL_CONNECTED) {
 +      Serial.println("[TCP] WiFi connect failed");
 +      return;
 +    }
    }
  
--  for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
--    _raw_rx_pos[i] = 0;
+-  if (WiFi.status() != WL_CONNECTED) {
+-    Serial.println("[TCP] WiFi connect failed");
+-    return;
 +  if (!_raw_packet_server) {
 +    for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
 +      _raw_rx_pos[i] = 0;
@@ -47,15 +41,92 @@ index 4214c2f..6ee7830 100644
 +    Serial.printf("[TCP] Raw packet server started on %s:%d\n", WiFi.localIP().toString().c_str(), TCP_PORT);
    }
  
--  _raw_packet_server = new WiFiServer(TCP_PORT);
--  _raw_packet_server->begin();
--  _raw_packet_server->setNoDelay(true);
--  Serial.printf("[TCP] Raw packet server started on %s:%d\n", WiFi.localIP().toString().c_str(), TCP_PORT);
+-  for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
+-    _raw_rx_pos[i] = 0;
 +  if (!_console_server) {
 +    _console_server = new WiFiServer(CONSOLE_PORT);
 +    _console_server->begin();
 +    _console_server->setNoDelay(true);
 +    Serial.printf("[CONSOLE] TCP console started on %s:%d\n", WiFi.localIP().toString().c_str(), CONSOLE_PORT);
+   }
+ 
+-  _raw_packet_server = new WiFiServer(TCP_PORT);
+-  _raw_packet_server->begin();
+-  _raw_packet_server->setNoDelay(true);
+-  Serial.printf("[TCP] Raw packet server started on %s:%d\n", WiFi.localIP().toString().c_str(), TCP_PORT);
++  if (!_console_mirror_server) {
++    _console_mirror_server = new WiFiServer(CONSOLE_MIRROR_PORT);
++    _console_mirror_server->begin();
++    _console_mirror_server->setNoDelay(true);
++    Serial.printf("[CONSOLE] TCP mirror started on %s:%d\n", WiFi.localIP().toString().c_str(), CONSOLE_MIRROR_PORT);
++  }
+ }
+ 
++void MyMesh::handleConsoleClientInput(WiFiClient& source, char* cmd_buf, int& cmd_len, bool mirror_to_usb) {
++  while (source.available()) {
++    int c = source.read();
++    if (c < 0) break;
++    char ch = (char)c;
++
++    if (ch == '\b' || ch == 0x7F) {
++      if (cmd_len > 0) {
++        cmd_len--;
++        cmd_buf[cmd_len] = 0;
++        source.print("\b \b");
++        if (mirror_to_usb) {
++          Serial.print("\b \b");
++        }
++      }
++      continue;
++    }
++
++    if (ch == '\n') {
++      if (cmd_len == 0) {
++        continue;
++      }
++      ch = '\r';
++    }
++
++    if (cmd_len < (int)sizeof(_console_cmd) - 1 && ch != '\r') {
++      cmd_buf[cmd_len++] = ch;
++      cmd_buf[cmd_len] = 0;
++      source.write((const uint8_t*)&ch, 1);
++      if (mirror_to_usb) {
++        Serial.write((const uint8_t*)&ch, 1);
++      }
++    }
++
++    if (ch == '\r' || cmd_len == (int)sizeof(_console_cmd) - 1) {
++      source.print("\r\n");
++      if (mirror_to_usb) {
++        Serial.print("\r\n");
++      }
++
++      char reply[160];
++      reply[0] = 0;
++
++      if (cmd_len > 0) {
++        handleCommand(0, cmd_buf, reply);
++      }
++
++      if (reply[0]) {
++        source.print("  -> ");
++        source.print(reply);
++        source.print("\r\n");
++        if (mirror_to_usb) {
++          Serial.print("  -> ");
++          Serial.print(reply);
++          Serial.print("\r\n");
++        }
++      }
++
++      cmd_len = 0;
++      cmd_buf[0] = 0;
++      source.print("> ");
++      if (mirror_to_usb) {
++        Serial.print("> ");
++      }
++    }
 +  }
 +}
 +
@@ -72,76 +143,56 @@ index 4214c2f..6ee7830 100644
 +      _console_client.print("MeshCore repeater console\r\n> ");
 +      Serial.println("[CONSOLE] Client connected");
 +    }
-+    return;
 +  }
 +
-+  while (_console_client.available()) {
-+    int c = _console_client.read();
-+    if (c < 0) break;
-+    char ch = (char)c;
++  if (_console_client && _console_client.connected()) {
++    handleConsoleClientInput(_console_client, _console_cmd, _console_cmd_len, false);
++  }
++}
 +
-+    if (ch == '\b' || ch == 0x7F) {
-+      if (_console_cmd_len > 0) {
-+        _console_cmd_len--;
-+        _console_cmd[_console_cmd_len] = 0;
-+        _console_client.print("\b \b");
-+      }
-+      continue;
-+    }
++void MyMesh::handleConsoleMirrorServer() {
++  if (_console_mirror_server == NULL) return;
 +
-+    if (ch == '\n') {
-+      if (_console_cmd_len == 0) {
-+        continue;
-+      }
-+      ch = '\r';
-+    }
-+
-+    if (_console_cmd_len < (int)sizeof(_console_cmd) - 1 && ch != '\r') {
-+      _console_cmd[_console_cmd_len++] = ch;
-+      _console_cmd[_console_cmd_len] = 0;
-+      _console_client.write((uint8_t)ch);
-+    }
-+
-+    if (ch == '\r' || _console_cmd_len == (int)sizeof(_console_cmd) - 1) {
-+      _console_client.print("\r\n");
-+
-+      char reply[160];
-+      reply[0] = 0;
-+
-+      if (_console_cmd_len > 0) {
-+        handleCommand(0, _console_cmd, reply);
-+      }
-+
-+      if (reply[0]) {
-+        _console_client.print("  -> ");
-+        _console_client.print(reply);
-+        _console_client.print("\r\n");
-+      }
-+
-+      _console_cmd_len = 0;
-+      _console_cmd[0] = 0;
-+      _console_client.print("> ");
++  if (!_console_mirror_client.connected()) {
++    if (_console_mirror_client) _console_mirror_client.stop();
++    WiFiClient incoming = _console_mirror_server->available();
++    if (incoming) {
++      _console_mirror_client = incoming;
++      _console_mirror_cmd_len = 0;
++      _console_mirror_cmd[0] = 0;
++      _console_mirror_client.print("MeshCore repeater console mirror\r\n> ");
++      Serial.print("\r\nMeshCore repeater console mirror\r\n> ");
++      Serial.println("[CONSOLE] Mirror client connected");
 +    }
 +  }
- }
- 
++
++  if (_console_mirror_client && _console_mirror_client.connected()) {
++    handleConsoleClientInput(_console_mirror_client, _console_mirror_cmd, _console_mirror_cmd_len, true);
++  }
++}
++
  void MyMesh::handleRawPacketServer() {
-@@ -904,6 +976,9 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
+   if (_raw_packet_server == NULL) return;
+ 
+@@ -897,6 +1024,12 @@
    region_load_active = false;
  #if defined(ESP32)
    _raw_packet_server = NULL;
 +  _console_server = NULL;
++  _console_mirror_server = NULL;
 +  _console_cmd_len = 0;
 +  _console_cmd[0] = 0;
++  _console_mirror_cmd_len = 0;
++  _console_mirror_cmd[0] = 0;
    for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
      _raw_rx_pos[i] = 0;
    }
-@@ -1306,12 +1381,15 @@ void MyMesh::loop() {
+@@ -1299,12 +1432,18 @@
    mesh::Mesh::loop();
  
  #if defined(ESP32)
 -  if (!_raw_packet_server) {
-+  if (!_raw_packet_server || !_console_server) {
++  if (!_raw_packet_server || !_console_server || !_console_mirror_server) {
      initTcpBridge();
    }
    if (_raw_packet_server) {
@@ -149,6 +200,9 @@ index 4214c2f..6ee7830 100644
    }
 +  if (_console_server) {
 +    handleConsoleServer();
++  }
++  if (_console_mirror_server) {
++    handleConsoleMirrorServer();
 +  }
  #endif
  

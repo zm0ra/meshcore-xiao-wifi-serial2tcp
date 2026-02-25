@@ -96,6 +96,7 @@ index 09d866c..7c84d6d 100644
 +        _raw_rx_pos[i] = 0;
 +      }
 +      MESH_DEBUG_PRINTLN("Raw packet server started on port 5002");
++      Serial.printf("[TCP] Raw packet server started on %s:%d\\n", WiFi.localIP().toString().c_str(), 5002);
 +    }
 +  }
 +
