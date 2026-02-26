@@ -39,7 +39,7 @@ Projekt jest gotowy pod wdrożenia „build + upload” i pod automatyzację (np
 3. Używaj portów:
    - `5002` – raw packets,
    - `5001` – clean CLI (komendy tekstowe),
-   - `5003` – mirror CLI (odbicie konsoli USB).
+  - `5003` – opcjonalny mirror CLI (odbicie konsoli USB; tylko z `--with-console-mirror`, przydatne dla MQTT z https://analyzer.letsmesh.net/observer/onboard).
 
 ### Najczęstsze scenariusze operacyjne
 
@@ -127,7 +127,7 @@ nc -vz <device-ip> 5002
 # Clean CLI
 nc -vz <device-ip> 5001
 
-# Mirror CLI (repeater)
+# Mirror CLI (repeater, tylko z --with-console-mirror)
 nc -vz <device-ip> 5003
 ```
 
@@ -146,6 +146,7 @@ Najważniejsze opcje:
 - `--clean` – kasuje katalog roboczy (`WORK_DIR`).
 - `--no-clone` – bez klonowania upstream repo.
 - `--no-patch` – bez nakładania patchy.
+- `--with-console-mirror` – włącza legacy mirror konsoli USB na `5003` (repeater).
 - `--build-only` – sam build, bez clone/patch/config.
 
 Przykłady:
@@ -163,7 +164,7 @@ Przykłady:
 |------|------|------|
 | Companion + Repeater | `5002` | Raw bridge (RS232Bridge) |
 | Repeater | `5001` | Clean CLI console (komendy tekstowe) |
-| Repeater | `5003` | Console mirror (echo konsoli USB po TCP) |
+| Repeater | `5003` | Opcjonalny mirror konsoli (echo konsoli USB po TCP; tylko z `--with-console-mirror`, przydatne dla MQTT z https://analyzer.letsmesh.net/observer/onboard) |
 
 ## Konfiguracja (`config.env`)
 

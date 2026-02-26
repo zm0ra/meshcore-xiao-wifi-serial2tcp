@@ -60,6 +60,7 @@ BLE_DEBUG_LOGGING=0
 USE_UPSTREAM_BUILD=1
 FIRMWARE_VERSION="dev"
 EXTRA_BUILD_FLAGS=""
+ENABLE_CONSOLE_MIRROR_PATCH=0
 
 # Identity / advertising
 ADVERT_NAME="XiaoS3 WiFi"
@@ -121,6 +122,7 @@ BLE_DEBUG_LOGGING=${BLE_DEBUG_LOGGING:-0}
 USE_UPSTREAM_BUILD=${USE_UPSTREAM_BUILD:-1}
 FIRMWARE_VERSION="${FIRMWARE_VERSION:-dev}"
 EXTRA_BUILD_FLAGS="${EXTRA_BUILD_FLAGS:-}"
+ENABLE_CONSOLE_MIRROR_PATCH=${ENABLE_CONSOLE_MIRROR_PATCH:-0}
 
 ADVERT_NAME="${ADVERT_NAME:-XiaoS3 WiFi}"
 ADVERT_LAT=${ADVERT_LAT:-0.0}
@@ -227,38 +229,64 @@ detect_upload_port() {
 print_header() {
     echo -e "${BLUE}"
     echo "═══════════════════════════════════════════════════════════════"
-    echo "  Xiao S3 Companion Radio Builder - WiFi + TCP Serial"
+    echo "  Xiao S3 MeshCore Builder - Companion / Repeater"
     echo "═══════════════════════════════════════════════════════════════"
     echo -e "${NC}"
 }
 
 print_usage() {
         cat << 'EOF'
-Usage: ./build.sh [--repeater] --build [--upload] [OPTIONS]
+Usage:
+    ./build.sh [ROLE] [ACTIONS] [OPTIONS]
 
-Firmware Roles:
-    (default)      Build companion radio (WiFi + LoRa bridge)
-    --repeater     Build repeater (mesh relay with admin interface)
+ROLE (choose one):
+    (default)      Companion firmware
+    --repeater     Repeater firmware (sets PIO env: Xiao_S3_WIO_repeater)
 
-Steps:
-    --build        Clone/patch and build firmware
-    --upload       Upload previously built firmware (combine with --build to build+upload)
+ACTIONS:
+    --build        Build firmware (clone/patch/configure/build unless skipped)
+    --upload       Upload existing firmware artifact
+    --monitor      Upload then open serial monitor (implies --upload)
 
-Options:
-    --clean        Remove WORK_DIR (fresh clone/build state)
-    --no-clone     Skip repository cloning (use existing checkout)
-    --no-patch     Skip applying patches
-    --monitor      Upload and start serial monitor
-    --build-only   Build without clone/patch/config steps
+BUILD FLOW OPTIONS:
+    --clean        Remove WORK_DIR before running
+    --no-clone     Skip clone/update step (use existing repo in WORK_DIR)
+    --no-patch     Skip patch step
+    --build-only   Build only (equivalent to: --build --no-clone --no-patch)
+    --with-console-mirror
+                  Enable optional repeater console mirror patches (TCP 5003)
     --help         Show this help
 
-Examples:
-    ./build.sh --clean                             # Remove build workspace
-    ./build.sh --clean --build                     # Fresh clone/patch/config/build
-    ./build.sh --build                             # Build companion
-    ./build.sh --repeater --build --upload         # Build repeater
-    ./build.sh --build --upload                    # Build & upload companion
-    ./build.sh --upload                            # Upload existing firmware
+PORTS BY CONFIGURATION:
+    Companion:
+            TCP_PORT (default 5002)      Serial@TCP endpoint for integrations/clients
+            CONSOLE_PORT (default 5001)  Companion console/control TCP endpoint
+
+    Repeater:
+            TCP_PORT (default 5002)      Serial@TCP endpoint (raw packet stream)
+            CONSOLE_PORT (default 5001)  Konsola konfiguracji/admin dla RPT
+            Mirror 5003                  Kopia konsoli USB wystawiona na TCP (tylko z --with-console-mirror, przydatne dla MQTT z https://analyzer.letsmesh.net/observer/onboard)
+
+EXPOSURE DIFFERENCES (Companion vs Repeater):
+        Companion:
+            - 5002: serial@tcp (główny endpoint dla narzędzi)
+            - 5001: companion console/control
+            - 5003: nieużywany
+
+        Repeater:
+            - 5002: serial@tcp (raw packets)
+            - 5001: konsola konfiguracji/admin RPT
+            - 5003: opcjonalny mirror konsoli USB po TCP (legacy, tylko po włączeniu patcha; przydatne dla MQTT z https://analyzer.letsmesh.net/observer/onboard)
+
+CONFIG SOURCE:
+    Values are read from config.env (WiFi, LoRa, ports, credentials, debug flags).
+
+EXAMPLES:
+    ./build.sh --clean --build
+    ./build.sh --build --upload
+    ./build.sh --repeater --build --upload
+    ./build.sh --repeater --build --with-console-mirror
+    ./build.sh --upload
 EOF
 }
 
@@ -365,9 +393,18 @@ apply_patches() {
 
             # Legacy/overlapping patches on recent MeshCore.
             # 03 duplicates env:Xiao_S3_WIO_companion_radio_wifi in variants/xiao_s3_wio/platformio.ini.
+            # 09/09b can duplicate repeater console declarations depending on upstream state.
             if [ "$patch_name" = "03-platformio-xiao-config.patch" ]; then
                 log_info "Skipping ${patch_name} (legacy/optional patch for current upstream)"
                 continue
+            fi
+
+            if [ "$patch_name" = "09-simple-repeater-tcp-console-header.patch" ] || \
+               [ "$patch_name" = "09b-simple-repeater-tcp-console.patch" ]; then
+                if [ "${ENABLE_CONSOLE_MIRROR_PATCH}" != "1" ]; then
+                    log_info "Skipping ${patch_name} (console mirror patch disabled; set ENABLE_CONSOLE_MIRROR_PATCH=1 or pass --with-console-mirror)"
+                    continue
+                fi
             fi
 
             log_info "Applying ${patch_name}..."
@@ -697,10 +734,18 @@ show_summary() {
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
     echo
     echo -e "Configuration:"
+    echo -e "  Role:         ${BUILD_ROLE}"
     echo -e "  WiFi SSID:    ${WIFI_SSID}"
     echo -e "  IP Address:   DHCP (check serial log for assigned IP)"
-    echo -e "  TCP Port:     ${TCP_PORT}"
-    echo -e "  Console Port: ${CONSOLE_PORT}"
+    if [ "${BUILD_ROLE}" = "repeater" ]; then
+        echo -e "  TCP Port:     ${TCP_PORT} (serial@tcp / raw packet stream)"
+        echo -e "  Console Port: ${CONSOLE_PORT} (konsola konfiguracji/admin RPT)"
+        echo -e "  Mirror 5003:  $([ "${ENABLE_CONSOLE_MIRROR_PATCH}" = "1" ] && echo enabled || echo disabled) (kopia konsoli USB po TCP, przydatne dla MQTT z https://analyzer.letsmesh.net/observer/onboard)"
+    else
+        echo -e "  TCP Port:     ${TCP_PORT} (serial@tcp endpoint)"
+        echo -e "  Console Port: ${CONSOLE_PORT} (companion console/control)"
+        echo -e "  Mirror 5003:  disabled (not used in companion)"
+    fi
     echo -e "  Build mode:   $([ "${USE_UPSTREAM_BUILD}" = "1" ] && echo upstream || echo direct pio)"
     echo -e "  PIO flags:    WiFi/LoRa/Debug/Identity from config.env ${EXTRA_BUILD_FLAGS}"
     echo
@@ -753,6 +798,10 @@ main() {
                 ;;
             --no-patch)
                 DO_PATCH=0
+                shift
+                ;;
+            --with-console-mirror)
+                ENABLE_CONSOLE_MIRROR_PATCH=1
                 shift
                 ;;
             --upload)
