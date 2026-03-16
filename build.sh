@@ -281,6 +281,10 @@ EXPOSURE DIFFERENCES (Companion vs Repeater):
 CONFIG SOURCE:
     Values are read from config.env (WiFi, LoRa, ports, credentials, debug flags).
 
+ESP32 BUILD OUTPUTS:
+    firmware.bin         Application image only
+    firmware-merged.bin  Full flash image for manual flashing at 0x0
+
 EXAMPLES:
     ./build.sh --clean --build
     ./build.sh --build --upload
@@ -791,6 +795,11 @@ show_summary() {
     echo -e "  ${REPO_DIR}/.pio/build/${PIO_ENV}/firmware.bin"
     if [ -f "${REPO_DIR}/.pio/build/${PIO_ENV}/firmware-merged.bin" ]; then
         echo -e "  ${REPO_DIR}/.pio/build/${PIO_ENV}/firmware-merged.bin (flash at 0x0)"
+    fi
+    if [ $DO_BUILD -eq 1 ] && [ $DO_UPLOAD -eq 0 ] && [ -f "${REPO_DIR}/.pio/build/${PIO_ENV}/firmware-merged.bin" ]; then
+        echo
+        echo -e "Manual flashing:"
+        echo -e "  Built without --upload. For manual ESP32 flashing, prefer ${BLUE}${REPO_DIR}/.pio/build/${PIO_ENV}/firmware-merged.bin${NC} at ${BLUE}0x0${NC}."
     fi
     echo
 }
