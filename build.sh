@@ -664,6 +664,8 @@ build_firmware() {
             exit 1
         fi
 
+        generate_merged_firmware
+
         log_success "Firmware built successfully (upstream build.sh)"
         return
     fi
@@ -673,8 +675,39 @@ build_firmware() {
     
     # Build
     PLATFORMIO_BUILD_FLAGS="${effective_platformio_build_flags}" pio run -e "$PIO_ENV"
+
+    generate_merged_firmware
     
     log_success "Firmware built successfully"
+}
+
+generate_merged_firmware() {
+    local build_dir
+    local firmware_path
+    local merged_path
+
+    build_dir="${REPO_DIR}/.pio/build/${PIO_ENV}"
+    firmware_path="${build_dir}/firmware.bin"
+    merged_path="${build_dir}/firmware-merged.bin"
+
+    if [ ! -f "$firmware_path" ]; then
+        log_warn "Skipping merged image generation because firmware.bin is missing"
+        return
+    fi
+
+    log_info "Generating merged flash image for ${PIO_ENV}..."
+    cd "$REPO_DIR"
+
+    if ! pio run -e "$PIO_ENV" -t mergebin >/dev/null; then
+        log_warn "Merged image target failed; use bootloader.bin + partitions.bin + firmware.bin for manual flashing"
+        return
+    fi
+
+    if [ -f "$merged_path" ]; then
+        log_success "Merged flash image ready: ${merged_path}"
+    else
+        log_warn "Merged image target completed but ${merged_path} was not created"
+    fi
 }
 
 upload_firmware() {
@@ -756,6 +789,9 @@ show_summary() {
     echo
     echo -e "Firmware location:"
     echo -e "  ${REPO_DIR}/.pio/build/${PIO_ENV}/firmware.bin"
+    if [ -f "${REPO_DIR}/.pio/build/${PIO_ENV}/firmware-merged.bin" ]; then
+        echo -e "  ${REPO_DIR}/.pio/build/${PIO_ENV}/firmware-merged.bin (flash at 0x0)"
+    fi
     echo
 }
 

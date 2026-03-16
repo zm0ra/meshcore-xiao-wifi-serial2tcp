@@ -110,6 +110,14 @@ Repeater with console mirror on port `5003`:
 ./build.sh --repeater --build --with-console-mirror
 ```
 
+For ESP32 targets the wrapper also generates a merged image after a successful build:
+
+```text
+build/meshcore-firmware/.pio/build/Xiao_S3_WIO_repeater/firmware-merged.bin
+```
+
+That file contains bootloader, partition table, and application merged into a single flashable image.
+
 ### 4. Upload firmware
 
 Build and upload in one step:
@@ -126,6 +134,15 @@ Upload an already built image without rebuilding:
 ./build.sh --upload
 ./build.sh --repeater --upload
 ```
+
+If you are flashing manually with `esptool.py`, prefer the merged image:
+
+```bash
+esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 460800 write_flash -z 0x0 \
+    build/meshcore-firmware/.pio/build/Xiao_S3_WIO_repeater/firmware-merged.bin
+```
+
+If you use `firmware.bin` instead, that is only the application image and must not be flashed alone at `0x0`.
 
 ### 5. Open the serial monitor
 
@@ -145,6 +162,35 @@ If the device boots successfully, you should see log lines similar to:
 ```
 
 The mirror line appears only when built with `--with-console-mirror`.
+
+## Flashing Notes
+
+On ESP32, PlatformIO normally builds multiple images:
+
+- `bootloader.bin`
+- `partitions.bin`
+- `firmware.bin`
+
+The wrapper now also generates:
+
+- `firmware-merged.bin`
+
+Use cases:
+
+- `firmware-merged.bin`: easiest manual flashing option, write at `0x0`
+- `firmware.bin`: application only, use only when bootloader and partition table on the device already match
+
+If you want to flash separate files manually, use the standard ESP32 layout:
+
+```bash
+esptool.py --chip esp32s3 --port /dev/ttyACM0 erase_flash
+
+esptool.py --chip esp32s3 --port /dev/ttyACM0 --baud 460800 write_flash -z \
+    0x0 build/meshcore-firmware/.pio/build/Xiao_S3_WIO_repeater/bootloader.bin \
+    0x8000 build/meshcore-firmware/.pio/build/Xiao_S3_WIO_repeater/partitions.bin \
+    0xe000 ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin \
+    0x10000 build/meshcore-firmware/.pio/build/Xiao_S3_WIO_repeater/firmware.bin
+```
 
 ## Firmware Modes
 
