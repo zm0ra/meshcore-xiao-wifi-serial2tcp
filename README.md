@@ -1,116 +1,142 @@
-# Xiao S3 WiFi TCP Bridge for MeshCore
+# MeshCore Xiao S3 WiFi Serial-to-TCP Builder
 
-Wrapper build system for MeshCore on Xiao ESP32-S3 that adds a LoRa ↔ WiFi/TCP bridge and repeater mode with remote console access.
+This repository provides a wrapper build system and patch set for building custom MeshCore firmware for the Seeed XIAO ESP32S3 with WiFi-based TCP access.
 
-The project is ready for both “build + upload” deployments and automation (e.g., Raspberry Pi host / CI runner).
+It supports two target roles:
 
-## What you get
+- Companion radio: LoRa mesh packets bridged over WiFi TCP on port `5002`
+- Repeater: the same TCP bridge on port `5002`, plus a remote CLI console on port `5001`
+- Repeater with console mirror: optional read-only mirror of the console output on port `5003`
 
-- Unified `build.sh` flow: clone → patch → configure flags → build → upload → monitor.
-- Two firmware roles:
-  - **Companion**: packet bridge over TCP.
-  - **Repeater**: bridge + remote admin console.
-- Stabilny transport binarny RS232Bridge (`C0 3E`, długość, Fletcher-16).
-- Multi-client TCP support (`MAX_TCP_CLIENTS=4`).
+## Overview
 
-## Practical usage
+The project does not replace MeshCore. Instead, it:
 
-### Tryb 1: Companion (bridge LoRa ↔ TCP)
+- clones upstream MeshCore from GitHub,
+- applies a local patch stack,
+- injects your WiFi, LoRa, and identity settings,
+- builds the requested PlatformIO environment,
+- optionally uploads the firmware to the board.
 
-1. Configure `config.env`.
-2. Uruchom:
+The result is a XIAO ESP32S3 firmware image that exposes MeshCore traffic over TCP using the RS232Bridge frame format.
 
-```bash
-./build.sh --build --upload
-```
+## Hardware and Software Requirements
 
-3. Read the IP from UART logs.
-4. Connect your client to `5002` and receive/send RS232Bridge frames.
+You need:
 
-### Tryb 2: Repeater (bridge + zdalna konsola)
+- a Seeed XIAO ESP32S3-based board used with MeshCore,
+- the appropriate LoRa radio hardware for your target setup,
+- a USB connection for flashing,
+- a 2.4 GHz WiFi network,
+- macOS or Linux with `bash`, `git`, and `platformio` available in `PATH`.
 
-1. Configure `config.env` (including admin/guest passwords).
-2. Uruchom:
-
-```bash
-./build.sh --repeater --build --upload
-```
-
-3. Use these ports:
-   - `5002` – raw packets,
-  - `5001` – clean CLI (text commands),
-  - `5003` – optional CLI mirror (USB console mirrored over TCP; only with `--with-console-mirror`, useful for MQTT with https://analyzer.letsmesh.net/observer/onboard).
-
-### Most common operational scenarios
-
-- **First clean deployment**
+PlatformIO can be installed with:
 
 ```bash
-./build.sh --clean --repeater --build --upload --monitor
+python3 -m pip install --user platformio
 ```
 
-- **Fast code iteration without re-cloning**
+## Repository Layout
+
+```text
+.
+├── build.sh
+├── config.env
+├── config.env.example
+├── mesh_client.py
+├── patches/
+└── build/
+    └── meshcore-firmware/
+```
+
+Key files:
+
+- `build.sh`: main wrapper for clone, patch, configure, build, upload, and monitor
+- `config.env.example`: template configuration file
+- `config.env`: your local configuration
+- `patches/`: custom changes applied on top of upstream MeshCore
+- `mesh_client.py`: simple TCP client for interacting with the bridge
+- `build/meshcore-firmware/`: generated working tree cloned from upstream MeshCore
+
+## Quick Start
+
+### 1. Clone this repository
 
 ```bash
-./build.sh --repeater --build --no-clone
+git clone https://github.com/zm0ra/meshcore-xiao-wifi-serial2tcp.git
+cd meshcore-xiao-wifi-serial2tcp
 ```
 
-- **Upload previously built firmware**
+### 2. Create your local configuration
 
 ```bash
-./build.sh --repeater --upload
+cp config.env.example config.env
 ```
 
-- **Build artifacts only (no upload)**
+Edit `config.env` and set at least:
+
+```bash
+WIFI_SSID="YourNetworkName"
+WIFI_PASSWORD="YourNetworkPassword"
+LORA_FREQ=869.618
+ADMIN_PASSWORD="changeme"
+GUEST_PASSWORD="guest"
+UPLOAD_PORT=""
+```
+
+Notes:
+
+- `UPLOAD_PORT` can be left empty for auto-detection.
+- On macOS, ports typically look like `/dev/cu.usbmodem*`.
+- `ADMIN_PASSWORD` and `GUEST_PASSWORD` are required for repeater mode.
+
+### 3. Build firmware
+
+Companion radio:
+
+```bash
+./build.sh --build
+```
+
+Repeater:
 
 ```bash
 ./build.sh --repeater --build
 ```
 
-- **Build without patching (upstream debug)**
+Repeater with console mirror on port `5003`:
 
 ```bash
-./build.sh --repeater --build --no-patch
+./build.sh --repeater --build --with-console-mirror
 ```
 
-## Wymagania
+### 4. Upload firmware
 
-- Xiao ESP32-S3 + radio LoRa,
-- USB do flashowania,
-- sieć WiFi 2.4 GHz,
-- macOS/Linux + `git` + `platformio` (`pio`).
-
-## Szybki start
-
-### 1) Klon repo i konfiguracja
+Build and upload in one step:
 
 ```bash
-git clone https://github.com/zm0ra/meshcore-xiao-wifi-serial2tcp.git
-cd meshcore-xiao-wifi-serial2tcp
-cp config.env.example config.env
-nano config.env
-```
-
-Minimum do ustawienia:
-
-```bash
-WIFI_SSID="YourNetwork"
-WIFI_PASSWORD="YourPassword"
-LORA_FREQ=869.618
-UPLOAD_PORT="/dev/cu.usbmodemXXXX"   # optional, auto-detect works when empty
-```
-
-### 2) Build i upload
-
-```bash
-# Companion
 ./build.sh --build --upload
-
-# Repeater
 ./build.sh --repeater --build --upload
+./build.sh --repeater --build --upload --with-console-mirror
 ```
 
-After boot, look for these log lines:
+Upload an already built image without rebuilding:
+
+```bash
+./build.sh --upload
+./build.sh --repeater --upload
+```
+
+### 5. Open the serial monitor
+
+To upload and then immediately open the serial monitor:
+
+```bash
+./build.sh --build --upload --monitor
+./build.sh --repeater --build --upload --monitor
+```
+
+If the device boots successfully, you should see log lines similar to:
 
 ```text
 [TCP] Raw packet server started on <ip>:5002
@@ -118,161 +144,355 @@ After boot, look for these log lines:
 [CONSOLE] TCP mirror started on <ip>:5003
 ```
 
-### 3) Test połączeń
+The mirror line appears only when built with `--with-console-mirror`.
 
-```bash
-# Raw packets
-nc -vz <device-ip> 5002
+## Firmware Modes
 
-# Clean CLI
-nc -vz <device-ip> 5001
+### Companion radio
 
-# Mirror CLI (repeater, only with --with-console-mirror)
-nc -vz <device-ip> 5003
-```
+Purpose:
 
-## Opcje `build.sh`
+- exposes the MeshCore packet stream over TCP,
+- accepts RS232Bridge-framed packets back from TCP clients,
+- useful for external tooling, integrations, and packet inspection.
+
+Default network port:
+
+- `5002`: raw bridge
+
+### Repeater
+
+Purpose:
+
+- behaves as a MeshCore repeater,
+- exposes the same raw TCP bridge,
+- adds a remote line-based CLI console.
+
+Default network ports:
+
+- `5002`: raw bridge
+- `5001`: interactive console
+
+### Repeater with console mirror
+
+Purpose:
+
+- same as repeater mode,
+- adds a read-only console mirror for passive observers.
+
+Default network ports:
+
+- `5002`: raw bridge
+- `5001`: interactive console
+- `5003`: read-only console mirror
+
+## Build Script Behavior
+
+The wrapper script performs these steps when `--build` is used:
+
+1. validate `config.env`,
+2. clone upstream MeshCore into `build/meshcore-firmware`,
+3. apply local patches from `patches/`,
+4. update `variants/xiao_s3_wio/platformio.ini` with your settings,
+5. run PlatformIO clean,
+6. build the selected environment,
+7. optionally upload the resulting firmware,
+8. optionally open the serial monitor.
+
+Important implementation detail:
+
+- patch `03-platformio-xiao-config.patch` is skipped for repeater builds because current upstream MeshCore already contains the companion WiFi section it used to add.
+
+## Build Script Options
+
+Current supported CLI options:
 
 ```text
 Usage: ./build.sh [--repeater] --build [--upload] [OPTIONS]
+
+Firmware Roles:
+    (default)      Build companion radio (WiFi + LoRa bridge)
+    --repeater     Build repeater (mesh relay with admin interface)
+
+Steps:
+    --build        Clone/patch/configure (unless skipped) and build firmware
+    --upload       Upload previously built firmware (combine with --build to build+upload)
+
+Options:
+    --with-console-mirror  Repeater only: expose read-only console mirror on port 5003
+    --no-clone     Skip repository cloning (use existing checkout)
+    --no-patch     Skip applying patches
+    --monitor      Upload and start serial monitor
+    --build-only   Build without clone/patch/config steps
+    --help         Show this help
 ```
 
-Key options:
-
-- `--repeater` – switch role to repeater (`PIO_ENV=Xiao_S3_WIO_repeater`).
-- `--build` – full build pipeline.
-- `--upload` – upload existing firmware (or build+upload with `--build`).
-- `--monitor` – start `pio device monitor` after upload.
-- `--clean` – remove working directory (`WORK_DIR`).
-- `--no-clone` – skip upstream repo cloning.
-- `--no-patch` – skip patch application.
-- `--with-console-mirror` – enable legacy USB console mirror on `5003` (repeater).
-- `--build-only` – build only, without clone/patch/config.
-
-Przykłady:
+Examples:
 
 ```bash
-./build.sh --clean --build
-./build.sh --repeater --build --upload --monitor
-./build.sh --build --no-clone --no-patch
-./build.sh --upload
+./build.sh --build
+./build.sh --build --upload
+./build.sh --repeater --build
+./build.sh --repeater --build --upload
+./build.sh --repeater --build --with-console-mirror
+./build.sh --repeater --build --upload --with-console-mirror
+./build.sh --build-only
+./build.sh --no-clone --no-patch --build
 ```
 
-## Ports and operating modes
+## Configuration Reference
 
-| Tryb | Port | Opis |
-|------|------|------|
-| Companion + Repeater | `5002` | Raw bridge (RS232Bridge) |
-| Repeater | `5001` | Clean CLI console (text commands) |
-| Repeater | `5003` | Optional console mirror (USB console echo over TCP; only with `--with-console-mirror`, useful for MQTT with https://analyzer.letsmesh.net/observer/onboard) |
+The build uses `config.env`. The most important settings are listed below.
 
-## Konfiguracja (`config.env`)
+### WiFi and TCP
 
-Key variables:
+| Variable | Default | Meaning |
+|---|---:|---|
+| `WIFI_SSID` | `YourNetworkName` | WiFi SSID |
+| `WIFI_PASSWORD` | `YourNetworkPassword` | WiFi password |
+| `TCP_PORT` | `5002` | Raw packet bridge port |
+| `CONSOLE_PORT` | `5001` | Repeater console port |
+| `CONSOLE_MIRROR_PORT` | `5003` | Repeater console mirror port |
+| `WIFI_DEBUG_LOGGING` | `1` | Enable WiFi-related serial logging |
 
-- **WiFi / TCP**: `WIFI_SSID`, `WIFI_PASSWORD`, `TCP_PORT`, `CONSOLE_PORT`, `WIFI_DEBUG_LOGGING`
-- **LoRa**: `LORA_FREQ`, `LORA_BW`, `LORA_SF`, `LORA_CR`, `LORA_TX_POWER`
-- **Identity**: `ADVERT_NAME`, `ADVERT_LAT`, `ADVERT_LON`, `ADMIN_PASSWORD`, `GUEST_PASSWORD`
-- **Debug**: `MESH_PACKET_LOGGING`, `MESH_DEBUG`, `BRIDGE_DEBUG`, `BLE_DEBUG_LOGGING`
-- **Build orchestration**: `USE_UPSTREAM_BUILD`, `EXTRA_BUILD_FLAGS`, `FIRMWARE_VERSION`
-- **Infra**: `UPLOAD_PORT`, `REPO_URL`, `REPO_BRANCH`, `WORK_DIR`, `PIO_ENV`
+### LoRa radio
 
-`config.env.example` contains the full set and default values.
+| Variable | Default | Meaning |
+|---|---:|---|
+| `LORA_FREQ` | `869.618` | Frequency in MHz |
+| `LORA_BW` | `62.5` | Bandwidth in kHz |
+| `LORA_SF` | `8` | Spreading factor |
+| `LORA_CR` | `5` | Coding rate |
+| `LORA_TX_POWER` | `22` | TX power |
 
-## Protokół TCP (RS232Bridge)
+You must set LoRa values appropriate for your region and your MeshCore network.
 
-Każda ramka:
+### Repeater access
+
+| Variable | Default | Meaning |
+|---|---:|---|
+| `ADMIN_PASSWORD` | `changeme` or `password` depending on file creation path | Repeater admin password |
+| `GUEST_PASSWORD` | `guest` | Repeater guest password |
+
+### Identity and advertising
+
+| Variable | Default | Meaning |
+|---|---:|---|
+| `ADVERT_NAME` | `XiaoS3 WiFi` | Advertised node name |
+| `ADVERT_LAT` | `0.0` | Advertised latitude |
+| `ADVERT_LON` | `0.0` | Advertised longitude |
+
+### Build and upload
+
+| Variable | Default | Meaning |
+|---|---:|---|
+| `BUILD_ROLE` | `companion` | Default role if CLI does not override it |
+| `PIO_ENV` | `Xiao_S3_WIO_companion_radio_wifi` | Default PlatformIO environment |
+| `UPLOAD_PORT` | empty | Explicit serial device path, if auto-detection is not enough |
+| `REPO_URL` | upstream MeshCore repo | Source repository to clone |
+| `REPO_BRANCH` | `main` | Upstream branch |
+| `WORK_DIR` | `./build` | Working directory for the generated upstream checkout |
+
+## Network Interfaces
+
+### Raw TCP bridge: port 5002
+
+This port carries RS232Bridge frames containing MeshCore packets.
+
+Use it when you want to:
+
+- inspect traffic,
+- connect external tooling,
+- feed packets into the device from a TCP client.
+
+Example:
+
+```bash
+nc <device-ip> 5002
+python3 mesh_client.py <device-ip> 5002
+```
+
+### Repeater console: port 5001
+
+This port is available only in repeater builds.
+
+It provides an interactive line-based console backed by the existing MeshCore CLI handler.
+
+Example:
+
+```bash
+nc <device-ip> 5001
+```
+
+### Console mirror: port 5003
+
+This port is available only when the firmware is built with `--with-console-mirror`.
+
+It is intended for passive observers. It mirrors console output but does not provide an interactive CLI session.
+
+Example:
+
+```bash
+nc <device-ip> 5003
+```
+
+## RS232Bridge Protocol
+
+The TCP bridge uses the RS232Bridge framing format.
+
+Frame layout:
 
 ```text
-[Magic:2] [Length:2] [Payload:N] [Checksum:2] [Newline:1]
-  C0 3E      00 15      ...         D9 B0        0A
+[Magic:2] [Length:2] [Payload:N] [Checksum:2] [LF:1]
+  C0 3E      00 15      ...         D9 B0      0A
 ```
 
-- `Magic`: zawsze `C0 3E`
-- `Length`: big-endian, długość `Payload`
-- `Checksum`: Fletcher-16 po `Payload`
-- TCP input ignores `\r/\n`, TCP output appends `\n` after each frame
+Field meaning:
 
-## What gets patched
+- `Magic`: fixed `C0 3E`
+- `Length`: big-endian payload length
+- `Payload`: raw MeshCore packet
+- `Checksum`: Fletcher-16 over the payload
+- `LF`: newline appended by the bridge for stream-friendly parsing
 
-W katalogu `patches/`:
+Input handling notes:
 
-- `01-mymesh-header.patch`
-- `02-mymesh-implementation.patch`
-- `03-platformio-xiao-config.patch` *(legacy, skipped by default by the script)*
-- `04-platformio-base.patch`
-- `05-xiao-board-led.patch`
-- `06-simple-repeater-platformio.patch`
-- `07-simple-repeater-wifi-tcp.patch`
-- `07b-simple-repeater-wifi-tcp-header.patch`
-- `08-add-wifi-macros-defaults.patch`
-- `09-simple-repeater-tcp-console-header.patch`
-- `09b-simple-repeater-tcp-console.patch`
+- incoming `\r` and `\n` are ignored by the parser,
+- only valid RS232Bridge frames are accepted,
+- multiple TCP clients can be connected at the same time,
+- outgoing frames are broadcast to all connected bridge clients.
 
-## Typical developer workflow
+## Using mesh_client.py
+
+The included `mesh_client.py` is a simple helper for talking to the raw TCP bridge.
+
+Example:
 
 ```bash
-# full clean build
-./build.sh --clean --repeater --build
-
-# upload already-built firmware only
-./build.sh --repeater --upload
-
-# monitor logs
-./build.sh --repeater --upload --monitor
+python3 mesh_client.py <device-ip> 5002
 ```
 
-Artifacts:
+Important limitations:
 
-- `build/meshcore-firmware/.pio/build/<PIO_ENV>/firmware.bin`
-- `build/meshcore-firmware/.pio/build/<PIO_ENV>/firmware-merged.bin` (if generated by the upstream merge step)
+- it wraps your hex payload into RS232Bridge framing,
+- it does not generate valid high-level MeshCore application packets for you,
+- if the mesh requires a fully formed packet with signatures, MICs, or other upstream-specific encoding, you must provide a packet that is already complete.
 
-## Troubleshooting (quick)
+## What the Patches Add
 
-### 1) `DuplicateSectionError` in `variants/xiao_s3_wio/platformio.ini`
+At a high level, the local patch set does the following:
 
-- Symptom: duplicate section, e.g. `env:Xiao_S3_WIO_companion_radio_wifi`.
-- Script behavior: automatic deduplication of `[env:*]` sections + skip of legacy patch `03`.
-- Manual fix: `./build.sh --clean --build`.
+- companion firmware: WiFi TCP bridging of MeshCore packets,
+- repeater firmware: raw TCP bridge plus line-based remote console,
+- optional repeater extension: read-only console mirror,
+- XIAO board-specific and PlatformIO adjustments needed to build the modified firmware.
 
-### 2) `pio -t upload` fails in `merge-bin.py` (`projenv`)
+## Typical Workflows
 
-- This is a known upstream hook issue.
-- Workaround: flash `firmware-merged.bin` directly with `esptool`.
-
-Przykład:
+### Build a companion image only
 
 ```bash
-esptool --chip esp32s3 --port /dev/cu.usbmodemXXXX --baud 921600 write-flash 0x0 \
-  build/meshcore-firmware/.pio/build/Xiao_S3_WIO_repeater/firmware-merged.bin
+./build.sh --build
 ```
 
-### 3) No WiFi connection
+### Build and upload a repeater image
 
-- check `WIFI_SSID` / `WIFI_PASSWORD`,
-- tylko 2.4 GHz,
-- check UART logs (`pio device monitor -b 115200`).
+```bash
+./build.sh --repeater --build --upload
+```
 
-### 4) Missing USB port for upload
+### Build, upload, and monitor a repeater with console mirror
+
+```bash
+./build.sh --repeater --build --upload --monitor --with-console-mirror
+```
+
+### Reuse an existing upstream checkout
+
+```bash
+./build.sh --no-clone --build
+```
+
+### Reuse an existing checkout and skip patch application
+
+```bash
+./build.sh --no-clone --no-patch --build
+```
+
+### Build an already prepared working tree
+
+```bash
+./build.sh --build-only
+```
+
+## Troubleshooting
+
+### Build was interrupted and `firmware.bin` is missing
+
+This is the most common reason for an apparently failed build in this repository. If the terminal shows `Build interrupted` or `AbortedByUser`, the build did not finish.
+
+Run a clean build again:
+
+```bash
+rm -rf build/meshcore-firmware
+./build.sh --repeater --build --with-console-mirror
+```
+
+### WiFi does not connect
+
+Check:
+
+- `WIFI_SSID` and `WIFI_PASSWORD` in `config.env`,
+- that the network is 2.4 GHz,
+- serial output for connection errors.
+
+### Upload port cannot be found
+
+List serial devices:
 
 ```bash
 pio device list
 ```
 
-Set `UPLOAD_PORT` in `config.env` if auto-detect does not find the device.
+If needed, set `UPLOAD_PORT` explicitly in `config.env`.
 
-## Struktura projektu
+### TCP port cannot be reached
 
-```text
-meshcore-xiao-wifi-serial2tcp/
-├── build.sh
-├── config.env.example
-├── patches/
-├── mesh_client.py
-└── build/                  # tworzone automatycznie
-    └── meshcore-firmware/
+Check:
+
+- the device IP shown in the serial log,
+- that your client is on the same network,
+- that you are connecting to the correct port for the selected firmware mode,
+- that the board successfully joined WiFi before you attempted the connection.
+
+### The mirror port is missing
+
+The repeater console mirror is not enabled automatically. You must build with:
+
+```bash
+./build.sh --repeater --build --with-console-mirror
 ```
 
-## Licencja
+or:
 
-This project is based on upstream `MeshCore` and follows its licensing terms.
+```bash
+./build.sh --repeater --build --upload --with-console-mirror
+```
+
+## Output Files
+
+The main build artifact is:
+
+```text
+build/meshcore-firmware/.pio/build/<environment>/firmware.bin
+```
+
+For the repeater environment used by this repository, that usually means:
+
+```text
+build/meshcore-firmware/.pio/build/Xiao_S3_WIO_repeater/firmware.bin
+```
+
+## License
+
+This repository is a build wrapper and patch set around upstream MeshCore. Refer to upstream MeshCore and included upstream license files for licensing details.
