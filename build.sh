@@ -231,9 +231,19 @@ detect_upload_port() {
 
 ensure_latest_github_esptool() {
     local tools_parent
+    local pybin
     tools_parent="$(dirname "$ESPTOOL_DIR")"
 
-    if ! command -v python3 >/dev/null 2>&1; then
+    pybin="$(find_bootstrap_python)" || {
+        log_error "Python >= 3.10 is required to bootstrap esptool from GitHub"
+        return 1
+    }
+
+    if [ "$pybin" != "$(command -v python3 2>/dev/null || true)" ]; then
+        log_info "Using Python interpreter for esptool bootstrap: $pybin"
+    fi
+
+    if [ -z "$pybin" ]; then
         log_error "python3 is required to bootstrap esptool from GitHub"
         return 1
     fi
@@ -255,19 +265,47 @@ ensure_latest_github_esptool() {
         git clone --depth 1 "$ESPTOOL_REPO_URL" "$ESPTOOL_DIR"
     fi
 
+    if [ -d "$ESPTOOL_VENV_DIR" ]; then
+        if ! "${ESPTOOL_VENV_DIR}/bin/python" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
+            log_warn "Existing esptool venv uses Python < 3.10; recreating..."
+            rm -rf "$ESPTOOL_VENV_DIR"
+        fi
+    fi
+
     if [ ! -d "$ESPTOOL_VENV_DIR" ]; then
         log_info "Creating local Python venv for esptool..."
-        python3 -m venv "$ESPTOOL_VENV_DIR"
+        "$pybin" -m venv "$ESPTOOL_VENV_DIR"
     fi
 
     log_info "Installing/updating esptool dependencies..."
     "${ESPTOOL_VENV_DIR}/bin/python" -m pip install --upgrade pip >/dev/null
-    "${ESPTOOL_VENV_DIR}/bin/python" -m pip install -r "${ESPTOOL_DIR}/requirements.txt" >/dev/null
+    "${ESPTOOL_VENV_DIR}/bin/python" -m pip install --upgrade "${ESPTOOL_DIR}" >/dev/null
 
     if [ ! -f "${ESPTOOL_DIR}/esptool.py" ]; then
         log_error "Bootstrapped esptool is missing script: ${ESPTOOL_DIR}/esptool.py"
         return 1
     fi
+}
+
+find_bootstrap_python() {
+    local candidates=()
+    local py
+
+    if command -v python3 >/dev/null 2>&1; then
+        candidates+=("$(command -v python3)")
+    fi
+    [ -x /usr/local/bin/python3 ] && candidates+=("/usr/local/bin/python3")
+    [ -x /opt/homebrew/bin/python3 ] && candidates+=("/opt/homebrew/bin/python3")
+    [ -x /usr/bin/python3 ] && candidates+=("/usr/bin/python3")
+
+    for py in "${candidates[@]}"; do
+        if "$py" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
+            echo "$py"
+            return 0
+        fi
+    done
+
+    return 1
 }
 
 flash_merged_image() {
