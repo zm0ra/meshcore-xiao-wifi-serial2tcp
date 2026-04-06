@@ -264,19 +264,19 @@ PORTS BY CONFIGURATION:
 
     Repeater:
             TCP_PORT (default 5002)      Serial@TCP endpoint (raw packet stream)
-            CONSOLE_PORT (default 5001)  Konsola konfiguracji/admin dla RPT
-            Mirror 5003                  Kopia konsoli USB wystawiona na TCP (tylko z --with-console-mirror, przydatne dla MQTT z https://analyzer.letsmesh.net/observer/onboard)
+            CONSOLE_PORT (default 5001)  Repeater configuration/admin console
+            Mirror 5003                  USB console mirror exposed via TCP (only with --with-console-mirror; useful for MQTT with https://analyzer.letsmesh.net/observer/onboard)
 
 EXPOSURE DIFFERENCES (Companion vs Repeater):
         Companion:
-            - 5002: serial@tcp (główny endpoint dla narzędzi)
+            - 5002: serial@tcp (main endpoint for tools)
             - 5001: companion console/control
-            - 5003: nieużywany
+            - 5003: unused
 
         Repeater:
             - 5002: serial@tcp (raw packets)
-            - 5001: konsola konfiguracji/admin RPT
-            - 5003: opcjonalny mirror konsoli USB po TCP (legacy, tylko po włączeniu patcha; przydatne dla MQTT z https://analyzer.letsmesh.net/observer/onboard)
+            - 5001: repeater configuration/admin console
+            - 5003: optional USB console mirror over TCP (legacy, only when patch is enabled; useful for MQTT with https://analyzer.letsmesh.net/observer/onboard)
 
 CONFIG SOURCE:
     Values are read from config.env (WiFi, LoRa, ports, credentials, debug flags).
@@ -334,6 +334,53 @@ compose_platformio_build_flags() {
     fi
 
     echo "${flags}"
+}
+
+compose_firmware_metadata_flags() {
+    local commit_hash
+    local build_date
+    local version_string
+
+    commit_hash="$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    build_date="$(date '+%d-%b-%Y')"
+    version_string="${FIRMWARE_VERSION}-${commit_hash}"
+
+    echo "-D FIRMWARE_BUILD_DATE='\"${build_date}\"' -D FIRMWARE_VERSION='\"${version_string}\"'"
+}
+
+escape_sed_replacement() {
+    printf '%s' "$1" | sed 's/[&|]/\\&/g'
+}
+
+sync_firmware_metadata_headers() {
+    local build_date
+    local firmware_version
+    local esc_build_date
+    local esc_firmware_version
+    local header
+    local headers
+
+    build_date="$(date '+%d %b %Y')"
+    firmware_version="${FIRMWARE_VERSION}"
+    esc_build_date="$(escape_sed_replacement "$build_date")"
+    esc_firmware_version="$(escape_sed_replacement "$firmware_version")"
+
+    headers=(
+        "${REPO_DIR}/examples/simple_repeater/MyMesh.h"
+        "${REPO_DIR}/examples/companion_radio/MyMesh.h"
+        "${REPO_DIR}/examples/simple_room_server/MyMesh.h"
+        "${REPO_DIR}/examples/simple_sensor/SensorMesh.h"
+    )
+
+    for header in "${headers[@]}"; do
+        if [ ! -f "$header" ]; then
+            continue
+        fi
+
+        sed -i.bak -E "s|^([[:space:]]*#define[[:space:]]+FIRMWARE_BUILD_DATE[[:space:]]+).*$|\\1\"${esc_build_date}\"|" "$header"
+        sed -i.bak -E "s|^([[:space:]]*#define[[:space:]]+FIRMWARE_VERSION[[:space:]]+).*$|\\1\"${esc_firmware_version}\"|" "$header"
+        rm -f "${header}.bak"
+    done
 }
 
 check_dependencies() {
@@ -558,6 +605,7 @@ configure_build_flags() {
 
     # Ensure the repeater env contains the flags we later substitute via sed.
     ensure_repeater_env_build_flags "$config_file"
+    sync_firmware_metadata_headers
 
     # WiFi
     sed -i.bak "s|-D WIFI_SSID='\"[^\"]*\"'|-D WIFI_SSID='\"${WIFI_SSID}\"'|" "$config_file"
@@ -646,7 +694,11 @@ build_firmware() {
     fi
 
     local effective_platformio_build_flags
+    local metadata_build_flags
+    local final_platformio_build_flags
     effective_platformio_build_flags="$(compose_platformio_build_flags)"
+    metadata_build_flags="$(compose_firmware_metadata_flags)"
+    final_platformio_build_flags="${effective_platformio_build_flags} ${metadata_build_flags}"
 
     log_info "PLATFORMIO_BUILD_FLAGS include WiFi/LoRa/Debug/Identity overrides from config.env"
 
@@ -658,7 +710,7 @@ build_firmware() {
 
         log_info "Delegating firmware build to upstream MeshCore build.sh"
         FIRMWARE_VERSION="${FIRMWARE_VERSION}" \
-        PLATFORMIO_BUILD_FLAGS="${effective_platformio_build_flags}" \
+        PLATFORMIO_BUILD_FLAGS="${final_platformio_build_flags}" \
             bash "${REPO_DIR}/build.sh" build-firmware "${PIO_ENV}"
 
         local firmware_path
@@ -675,10 +727,10 @@ build_firmware() {
     fi
     
     # Clean previous build
-    PLATFORMIO_BUILD_FLAGS="${effective_platformio_build_flags}" pio run -e "$PIO_ENV" --target clean
+    PLATFORMIO_BUILD_FLAGS="${final_platformio_build_flags}" pio run -e "$PIO_ENV" --target clean
     
     # Build
-    PLATFORMIO_BUILD_FLAGS="${effective_platformio_build_flags}" pio run -e "$PIO_ENV"
+    PLATFORMIO_BUILD_FLAGS="${final_platformio_build_flags}" pio run -e "$PIO_ENV"
 
     generate_merged_firmware
     
@@ -716,6 +768,9 @@ generate_merged_firmware() {
 
 upload_firmware() {
     local port
+    local effective_platformio_build_flags
+    local metadata_build_flags
+    local final_platformio_build_flags
     port=$(detect_upload_port)
 
     if [ -z "$port" ]; then
@@ -726,7 +781,12 @@ upload_firmware() {
     log_info "Uploading firmware to ${port}..."
     
     cd "$REPO_DIR"
-    pio run -e "$PIO_ENV" -t upload --upload-port "$port"
+    effective_platformio_build_flags="$(compose_platformio_build_flags)"
+    metadata_build_flags="$(compose_firmware_metadata_flags)"
+    final_platformio_build_flags="${effective_platformio_build_flags} ${metadata_build_flags}"
+
+    PLATFORMIO_BUILD_FLAGS="${final_platformio_build_flags}" \
+        pio run -e "$PIO_ENV" -t upload --upload-port "$port"
     
     log_success "Firmware uploaded successfully"
 }
@@ -776,8 +836,8 @@ show_summary() {
     echo -e "  IP Address:   DHCP (check serial log for assigned IP)"
     if [ "${BUILD_ROLE}" = "repeater" ]; then
         echo -e "  TCP Port:     ${TCP_PORT} (serial@tcp / raw packet stream)"
-        echo -e "  Console Port: ${CONSOLE_PORT} (konsola konfiguracji/admin RPT)"
-        echo -e "  Mirror 5003:  $([ "${ENABLE_CONSOLE_MIRROR_PATCH}" = "1" ] && echo enabled || echo disabled) (kopia konsoli USB po TCP, przydatne dla MQTT z https://analyzer.letsmesh.net/observer/onboard)"
+        echo -e "  Console Port: ${CONSOLE_PORT} (repeater configuration/admin console)"
+        echo -e "  Mirror 5003:  $([ "${ENABLE_CONSOLE_MIRROR_PATCH}" = "1" ] && echo enabled || echo disabled) (USB console mirror over TCP, useful for MQTT with https://analyzer.letsmesh.net/observer/onboard)"
     else
         echo -e "  TCP Port:     ${TCP_PORT} (serial@tcp endpoint)"
         echo -e "  Console Port: ${CONSOLE_PORT} (companion console/control)"
