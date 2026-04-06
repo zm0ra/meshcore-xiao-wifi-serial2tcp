@@ -768,9 +768,9 @@ generate_merged_firmware() {
 
 upload_firmware() {
     local port
-    local effective_platformio_build_flags
-    local metadata_build_flags
-    local final_platformio_build_flags
+    local build_dir
+    local firmware_path
+    local merged_path
     port=$(detect_upload_port)
 
     if [ -z "$port" ]; then
@@ -779,14 +779,34 @@ upload_firmware() {
     fi
 
     log_info "Uploading firmware to ${port}..."
-    
-    cd "$REPO_DIR"
-    effective_platformio_build_flags="$(compose_platformio_build_flags)"
-    metadata_build_flags="$(compose_firmware_metadata_flags)"
-    final_platformio_build_flags="${effective_platformio_build_flags} ${metadata_build_flags}"
 
-    PLATFORMIO_BUILD_FLAGS="${final_platformio_build_flags}" \
+    build_dir="${REPO_DIR}/.pio/build/${PIO_ENV}"
+    firmware_path="${build_dir}/firmware.bin"
+    merged_path="${build_dir}/firmware-merged.bin"
+
+    if [ ! -f "$firmware_path" ]; then
+        log_error "Firmware artifact missing: ${firmware_path}. Run with --build first."
+        exit 1
+    fi
+
+    if [ ! -f "$merged_path" ]; then
+        log_warn "Merged image missing, generating it now..."
+        generate_merged_firmware
+    fi
+
+    if [ ! -f "$merged_path" ]; then
+        log_error "Merged image is still missing: ${merged_path}"
+        exit 1
+    fi
+
+    if command -v esptool.py >/dev/null 2>&1; then
+        log_info "Flashing merged image with esptool (no rebuild)..."
+        esptool.py --chip esp32s3 --port "$port" --baud 460800 write_flash -z 0x0 "$merged_path"
+    else
+        log_warn "esptool.py not found; falling back to PlatformIO upload (may rebuild)"
+        cd "$REPO_DIR"
         pio run -e "$PIO_ENV" -t upload --upload-port "$port"
+    fi
     
     log_success "Firmware uploaded successfully"
 }
