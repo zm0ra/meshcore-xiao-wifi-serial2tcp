@@ -135,6 +135,11 @@ Upload an already built image without rebuilding:
 ./build.sh --repeater --upload
 ```
 
+`--upload` flashes the already built merged image and does not trigger a second firmware build.
+By default it uses `esptool`/`esptool.py` from your PATH; if neither is installed, the wrapper
+automatically clones the latest `esptool` from GitHub into `build/tools/esptool`, creates a local
+Python virtual environment, and uses that copy for flashing.
+
 If you are flashing manually with `esptool.py`, prefer the merged image:
 
 ```bash

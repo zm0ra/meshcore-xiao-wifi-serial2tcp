@@ -132,6 +132,9 @@ ADMIN_PASSWORD="${ADMIN_PASSWORD:-password}"
 # Allow overriding work directory via env or config
 WORK_DIR="${WORK_DIR:-$DEFAULT_WORK_DIR}"
 REPO_DIR="${REPO_DIR:-${WORK_DIR}/meshcore-firmware}"
+ESPTOOL_REPO_URL="${ESPTOOL_REPO_URL:-https://github.com/espressif/esptool.git}"
+ESPTOOL_DIR="${ESPTOOL_DIR:-${WORK_DIR}/tools/esptool}"
+ESPTOOL_VENV_DIR="${ESPTOOL_VENV_DIR:-${WORK_DIR}/tools/esptool-venv}"
 
 # Functions
 log_info() {
@@ -224,6 +227,69 @@ detect_upload_port() {
 
     # Last fallback: empty
     echo ""
+}
+
+ensure_latest_github_esptool() {
+    local tools_parent
+    tools_parent="$(dirname "$ESPTOOL_DIR")"
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        log_error "python3 is required to bootstrap esptool from GitHub"
+        return 1
+    fi
+
+    mkdir -p "$tools_parent"
+
+    if [ -d "${ESPTOOL_DIR}/.git" ]; then
+        log_info "Updating local esptool clone..."
+        if ! git -C "$ESPTOOL_DIR" pull --ff-only >/dev/null 2>&1; then
+            log_warn "Could not fast-forward esptool clone; using current checkout"
+        fi
+    else
+        if [ -d "$ESPTOOL_DIR" ]; then
+            log_error "ESPTOOL_DIR exists but is not a git checkout: ${ESPTOOL_DIR}"
+            log_error "Remove it manually or set ESPTOOL_DIR to a different path."
+            return 1
+        fi
+        log_info "Cloning latest esptool from GitHub..."
+        git clone --depth 1 "$ESPTOOL_REPO_URL" "$ESPTOOL_DIR"
+    fi
+
+    if [ ! -d "$ESPTOOL_VENV_DIR" ]; then
+        log_info "Creating local Python venv for esptool..."
+        python3 -m venv "$ESPTOOL_VENV_DIR"
+    fi
+
+    log_info "Installing/updating esptool dependencies..."
+    "${ESPTOOL_VENV_DIR}/bin/python" -m pip install --upgrade pip >/dev/null
+    "${ESPTOOL_VENV_DIR}/bin/python" -m pip install -r "${ESPTOOL_DIR}/requirements.txt" >/dev/null
+
+    if [ ! -f "${ESPTOOL_DIR}/esptool.py" ]; then
+        log_error "Bootstrapped esptool is missing script: ${ESPTOOL_DIR}/esptool.py"
+        return 1
+    fi
+}
+
+flash_merged_image() {
+    local port="$1"
+    local merged_path="$2"
+
+    if command -v esptool >/dev/null 2>&1; then
+        log_info "Flashing merged image with system esptool (no rebuild)..."
+        esptool --chip esp32s3 --port "$port" --baud 460800 write_flash -z 0x0 "$merged_path"
+        return
+    fi
+
+    if command -v esptool.py >/dev/null 2>&1; then
+        log_info "Flashing merged image with system esptool.py (no rebuild)..."
+        esptool.py --chip esp32s3 --port "$port" --baud 460800 write_flash -z 0x0 "$merged_path"
+        return
+    fi
+
+    log_warn "esptool not found in PATH; bootstrapping latest esptool from GitHub..."
+    ensure_latest_github_esptool
+    log_info "Flashing merged image with bootstrapped esptool (no rebuild)..."
+    "${ESPTOOL_VENV_DIR}/bin/python" "${ESPTOOL_DIR}/esptool.py" --chip esp32s3 --port "$port" --baud 460800 write_flash -z 0x0 "$merged_path"
 }
 
 print_header() {
@@ -799,14 +865,7 @@ upload_firmware() {
         exit 1
     fi
 
-    if command -v esptool.py >/dev/null 2>&1; then
-        log_info "Flashing merged image with esptool (no rebuild)..."
-        esptool.py --chip esp32s3 --port "$port" --baud 460800 write_flash -z 0x0 "$merged_path"
-    else
-        log_warn "esptool.py not found; falling back to PlatformIO upload (may rebuild)"
-        cd "$REPO_DIR"
-        pio run -e "$PIO_ENV" -t upload --upload-port "$port"
-    fi
+    flash_merged_image "$port" "$merged_path"
     
     log_success "Firmware uploaded successfully"
 }
