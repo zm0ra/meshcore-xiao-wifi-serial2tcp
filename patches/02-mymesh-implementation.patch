@@ -83,7 +83,7 @@ index 09d866c..7c84d6d 100644
    // defaults
    memset(&_prefs, 0, sizeof(_prefs));
    _prefs.airtime_factor = 1.0; // one half
-@@ -1841,6 +1874,21 @@ void MyMesh::loop() {
+@@ -1841,6 +1874,22 @@ void MyMesh::loop() {
      checkSerialInterface();
    }
  
@@ -105,7 +105,7 @@ index 09d866c..7c84d6d 100644
 +
    // is there are pending dirty contacts write needed?
    if (dirty_contacts_expiry && millisHasNowPassed(dirty_contacts_expiry)) {
-     saveContacts();
+      saveContacts();
 @@ -1865,4 +1913,324 @@ bool MyMesh::advert() {
    } else {
      return false;
