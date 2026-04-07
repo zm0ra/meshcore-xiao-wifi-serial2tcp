@@ -547,38 +547,67 @@ apply_patches() {
     log_info "Applying code patches..."
     
     cd "$REPO_DIR"
-    
+
+    apply_patch_file() {
+        local patch_file="$1"
+        local optional="${2:-0}"
+        local patch_name
+        patch_name="$(basename "$patch_file")"
+
+        log_info "Applying ${patch_name}..."
+
+        # First dry-run to avoid partial apply that can corrupt working tree.
+        if patch -p1 --forward --batch --dry-run < "$patch_file" >/dev/null 2>&1; then
+            patch -p1 --forward --batch < "$patch_file" >/dev/null
+            return 0
+        fi
+
+        # Already applied (or reversed) patch.
+        if patch -p1 -R --batch --dry-run < "$patch_file" >/dev/null 2>&1; then
+            log_warn "Patch ${patch_name} already applied - skipping"
+            return 0
+        fi
+
+        if [ "$optional" = "1" ]; then
+            log_warn "Patch ${patch_name} skipped (optional/overlapping on current upstream)"
+            return 0
+        fi
+
+        log_error "Patch ${patch_name} failed to apply cleanly"
+        exit 1
+    }
+
     # Apply each patch in non-interactive mode; skip already-applied/reversed patches.
     for patch_file in "$PATCHES_DIR"/*.patch; do
-        if [ -f "$patch_file" ]; then
-            local patch_name
-            patch_name="$(basename "$patch_file")"
+        if [ ! -f "$patch_file" ]; then
+            continue
+        fi
 
-            # Legacy/overlapping patches on recent MeshCore.
-            # 03 duplicates env:Xiao_S3_WIO_companion_radio_wifi in variants/xiao_s3_wio/platformio.ini.
-            # 09/09b can duplicate repeater console declarations depending on upstream state.
-            if [ "$patch_name" = "03-platformio-xiao-config.patch" ]; then
-                log_info "Skipping ${patch_name} (legacy/optional patch for current upstream)"
+        local patch_name
+        local optional
+        patch_name="$(basename "$patch_file")"
+        optional=0
+
+        # Legacy/overlapping patches on recent MeshCore.
+        # 03 duplicates env:Xiao_S3_WIO_companion_radio_wifi in variants/xiao_s3_wio/platformio.ini.
+        # 09/09b can duplicate repeater console declarations depending on upstream state.
+        if [ "$patch_name" = "03-platformio-xiao-config.patch" ]; then
+            log_info "Skipping ${patch_name} (legacy/optional patch for current upstream)"
+            continue
+        fi
+
+        if [ "$patch_name" = "09-simple-repeater-tcp-console-header.patch" ] || \
+           [ "$patch_name" = "09b-simple-repeater-tcp-console.patch" ]; then
+            if [ "${ENABLE_CONSOLE_MIRROR_PATCH}" != "1" ]; then
+                log_info "Skipping ${patch_name} (console mirror patch disabled; set ENABLE_CONSOLE_MIRROR_PATCH=1 or pass --with-console-mirror)"
                 continue
             fi
-
-            if [ "$patch_name" = "09-simple-repeater-tcp-console-header.patch" ] || \
-               [ "$patch_name" = "09b-simple-repeater-tcp-console.patch" ]; then
-                if [ "${ENABLE_CONSOLE_MIRROR_PATCH}" != "1" ]; then
-                    log_info "Skipping ${patch_name} (console mirror patch disabled; set ENABLE_CONSOLE_MIRROR_PATCH=1 or pass --with-console-mirror)"
-                    continue
-                fi
-            fi
-
-            log_info "Applying ${patch_name}..."
-            if patch -p1 --forward --batch < "$patch_file"; then
-                :
-            else
-                log_warn "Patch ${patch_name} skipped (already applied or not applicable)"
-            fi
+            optional=1
         fi
+
+        apply_patch_file "$patch_file" "$optional"
     done
-    
+
     log_success "Patches applied"
 }
 
