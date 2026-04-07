@@ -1,0 +1,385 @@
+diff --git a/examples/simple_repeater/MyMesh.cpp b/examples/simple_repeater/MyMesh.cpp
+index f0eb6b7..26f89ca 100644
+--- a/examples/simple_repeater/MyMesh.cpp
++++ b/examples/simple_repeater/MyMesh.cpp
+@@ -41,6 +41,14 @@
+   #define WIFI_PASSWORD ""
+ #endif
+ 
++#ifndef HTTP_STATS_PORT
++  #define HTTP_STATS_PORT 80
++#endif
++
++#ifndef MQTT_REPORTING_ENABLED
++  #define MQTT_REPORTING_ENABLED 0
++#endif
++
+ #ifndef SERVER_RESPONSE_DELAY
+   #define SERVER_RESPONSE_DELAY 300
+ #endif
+@@ -69,6 +77,37 @@
+ #define LAZY_CONTACTS_WRITE_DELAY    5000
+ 
+ #if defined(ESP32)
++struct TcpRuntimeStats {
++  uint32_t clients_accepted;
++  uint32_t clients_rejected;
++  uint32_t clients_disconnected;
++  uint32_t max_simultaneous_clients;
++  uint32_t rx_frames;
++  uint32_t rx_bytes;
++  uint32_t rx_parse_errors;
++  uint32_t rx_checksum_errors;
++  uint32_t tx_frames;
++  uint32_t tx_bytes;
++  uint32_t tx_deliveries;
++  uint32_t tx_delivery_failures;
++};
++
++struct MqttRuntimeStats {
++  bool connected;
++  uint32_t connect_attempts;
++  uint32_t reconnects;
++  uint32_t publish_ok;
++  uint32_t publish_fail;
++  int32_t last_error_code;
++};
++
++static TcpRuntimeStats g_tcp_stats = {};
++static MqttRuntimeStats g_mqtt_stats = {};
++static WiFiServer* g_http_stats_server = NULL;
++static bool g_tcp_client_connected[MAX_TCP_CLIENTS] = {false};
++static uint32_t g_http_requests_total = 0;
++static uint32_t g_http_not_found = 0;
++
+ static uint16_t fletcher16(const uint8_t* data, size_t len) {
+   uint16_t sum1 = 0;
+   uint16_t sum2 = 0;
+@@ -597,6 +636,189 @@ void MyMesh::initTcpBridge() {
+ void MyMesh::handleRawPacketServer() {
+   if (_raw_packet_server == NULL) return;
+ 
++  if (g_http_stats_server == NULL && WiFi.status() == WL_CONNECTED) {
++    g_http_stats_server = new WiFiServer(HTTP_STATS_PORT);
++    if (g_http_stats_server) {
++      g_http_stats_server->begin();
++      g_http_stats_server->setNoDelay(true);
++      Serial.printf("[HTTP] Stats endpoint started on http://%s:%d/stats\n", WiFi.localIP().toString().c_str(), HTTP_STATS_PORT);
++    }
++  }
++
++  if (g_http_stats_server) {
++    WiFiClient http_client = g_http_stats_server->available();
++    if (http_client) {
++      g_http_requests_total++;
++      http_client.setTimeout(250);
++
++      String request_line = http_client.readStringUntil('\n');
++      request_line.trim();
++
++      while (http_client.connected()) {
++        String header = http_client.readStringUntil('\n');
++        if (header == "\r" || header.length() == 0) break;
++      }
++
++      bool is_stats_req = request_line.startsWith("GET / ") ||
++                          request_line.startsWith("GET /stats ") ||
++                          request_line.startsWith("GET /stats.json ");
++
++      if (is_stats_req) {
++        uint32_t active_clients = 0;
++        for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
++          if (_raw_packet_clients[i].connected()) active_clients++;
++        }
++        if (active_clients > g_tcp_stats.max_simultaneous_clients) {
++          g_tcp_stats.max_simultaneous_clients = active_clients;
++        }
++
++        uint16_t direct_dups = ((SimpleMeshTables *)getTables())->getNumDirectDups();
++        uint16_t flood_dups = ((SimpleMeshTables *)getTables())->getNumFloodDups();
++        uint32_t now_epoch = getRTCClock()->getCurrentTime();
++        int16_t noise_floor = (int16_t)_radio->getNoiseFloor();
++        int16_t last_rssi = (int16_t)radio_driver.getLastRSSI();
++        int16_t last_snr_x4 = (int16_t)(radio_driver.getLastSNR() * 4);
++        uint32_t tx_air_secs = getTotalAirTime() / 1000;
++        uint32_t rx_air_secs = getReceiveAirTime() / 1000;
++        uint32_t queue_len = _mgr->getOutboundCount(0xFFFFFFFF);
++        int wifi_rssi = WiFi.RSSI();
++        String ip = WiFi.localIP().toString();
++        String ssid = WiFi.SSID();
++        const char* wifi_connected = (WiFi.status() == WL_CONNECTED) ? "true" : "false";
++        const char* mqtt_enabled = MQTT_REPORTING_ENABLED ? "true" : "false";
++        const char* mqtt_connected = g_mqtt_stats.connected ? "true" : "false";
++
++        char body[2048];
++        snprintf(
++            body, sizeof(body),
++            "{"
++            "\"role\":\"repeater\","
++            "\"timestamp\":%lu,"
++            "\"firmware_version\":\"%s\","
++            "\"wifi\":{"
++              "\"connected\":%s,"
++              "\"ssid\":\"%s\","
++              "\"ip\":\"%s\","
++              "\"rssi\":%d"
++            "},"
++            "\"radio\":{"
++              "\"battery_mv\":%u,"
++              "\"noise_floor\":%d,"
++              "\"last_rssi\":%d,"
++              "\"last_snr_x4\":%d,"
++              "\"packets_rx\":%lu,"
++              "\"packets_tx\":%lu,"
++              "\"recv_errors\":%lu,"
++              "\"tx_air_secs\":%lu,"
++              "\"rx_air_secs\":%lu,"
++              "\"uptime_ms\":%llu,"
++              "\"queue_len\":%lu,"
++              "\"err_flags\":%u,"
++              "\"sent_flood\":%lu,"
++              "\"sent_direct\":%lu,"
++              "\"recv_flood\":%lu,"
++              "\"recv_direct\":%lu,"
++              "\"direct_dups\":%u,"
++              "\"flood_dups\":%u"
++            "},"
++            "\"mqtt\":{"
++              "\"enabled\":%s,"
++              "\"connected\":%s,"
++              "\"connect_attempts\":%lu,"
++              "\"reconnects\":%lu,"
++              "\"publish_ok\":%lu,"
++              "\"publish_fail\":%lu,"
++              "\"last_error_code\":%ld"
++            "},"
++            "\"tcp\":{"
++              "\"port\":%d,"
++              "\"active_clients\":%lu,"
++              "\"clients_accepted\":%lu,"
++              "\"clients_rejected\":%lu,"
++              "\"clients_disconnected\":%lu,"
++              "\"max_simultaneous_clients\":%lu,"
++              "\"rx_frames\":%lu,"
++              "\"rx_bytes\":%lu,"
++              "\"rx_parse_errors\":%lu,"
++              "\"rx_checksum_errors\":%lu,"
++              "\"tx_frames\":%lu,"
++              "\"tx_bytes\":%lu,"
++              "\"tx_deliveries\":%lu,"
++              "\"tx_delivery_failures\":%lu"
++            "},"
++            "\"http\":{"
++              "\"port\":%d,"
++              "\"requests_total\":%lu,"
++              "\"not_found\":%lu"
++            "}"
++            "}\n",
++            (unsigned long)now_epoch,
++            FIRMWARE_VERSION,
++            wifi_connected,
++            ssid.c_str(),
++            ip.c_str(),
++            wifi_rssi,
++            (unsigned int)board.getBattMilliVolts(),
++            (int)noise_floor,
++            (int)last_rssi,
++            (int)last_snr_x4,
++            (unsigned long)radio_driver.getPacketsRecv(),
++            (unsigned long)radio_driver.getPacketsSent(),
++            (unsigned long)radio_driver.getPacketsRecvErrors(),
++            (unsigned long)tx_air_secs,
++            (unsigned long)rx_air_secs,
++            (unsigned long long)uptime_millis,
++            (unsigned long)queue_len,
++            (unsigned int)_err_flags,
++            (unsigned long)getNumSentFlood(),
++            (unsigned long)getNumSentDirect(),
++            (unsigned long)getNumRecvFlood(),
++            (unsigned long)getNumRecvDirect(),
++            (unsigned int)direct_dups,
++            (unsigned int)flood_dups,
++            mqtt_enabled,
++            mqtt_connected,
++            (unsigned long)g_mqtt_stats.connect_attempts,
++            (unsigned long)g_mqtt_stats.reconnects,
++            (unsigned long)g_mqtt_stats.publish_ok,
++            (unsigned long)g_mqtt_stats.publish_fail,
++            (long)g_mqtt_stats.last_error_code,
++            TCP_PORT,
++            (unsigned long)active_clients,
++            (unsigned long)g_tcp_stats.clients_accepted,
++            (unsigned long)g_tcp_stats.clients_rejected,
++            (unsigned long)g_tcp_stats.clients_disconnected,
++            (unsigned long)g_tcp_stats.max_simultaneous_clients,
++            (unsigned long)g_tcp_stats.rx_frames,
++            (unsigned long)g_tcp_stats.rx_bytes,
++            (unsigned long)g_tcp_stats.rx_parse_errors,
++            (unsigned long)g_tcp_stats.rx_checksum_errors,
++            (unsigned long)g_tcp_stats.tx_frames,
++            (unsigned long)g_tcp_stats.tx_bytes,
++            (unsigned long)g_tcp_stats.tx_deliveries,
++            (unsigned long)g_tcp_stats.tx_delivery_failures,
++            HTTP_STATS_PORT,
++            (unsigned long)g_http_requests_total,
++            (unsigned long)g_http_not_found);
++
++        http_client.print("HTTP/1.1 200 OK\r\n");
++        http_client.print("Content-Type: application/json\r\n");
++        http_client.print("Cache-Control: no-store\r\n");
++        http_client.print("Connection: close\r\n\r\n");
++        http_client.print(body);
++      } else {
++        g_http_not_found++;
++        http_client.print("HTTP/1.1 404 Not Found\r\n");
++        http_client.print("Content-Type: text/plain\r\n");
++        http_client.print("Connection: close\r\n\r\n");
++        http_client.print("Not Found\n");
++      }
++
++      delay(1);
++      http_client.stop();
++    }
++  }
++
+   WiFiClient incoming = _raw_packet_server->available();
+   if (incoming) {
+     int free_idx = -1;
+@@ -610,8 +832,10 @@ void MyMesh::handleRawPacketServer() {
+     if (free_idx >= 0) {
+       _raw_packet_clients[free_idx] = incoming;
+       _raw_rx_pos[free_idx] = 0;
++      g_tcp_stats.clients_accepted++;
+       Serial.printf("[TCP] Client connected (%d)\n", free_idx);
+     } else {
++      g_tcp_stats.clients_rejected++;
+       incoming.stop();
+     }
+   }
+@@ -619,9 +843,14 @@ void MyMesh::handleRawPacketServer() {
+   for (int idx = 0; idx < MAX_TCP_CLIENTS; idx++) {
+     auto &client = _raw_packet_clients[idx];
+     if (!client.connected()) {
++      if (g_tcp_client_connected[idx]) {
++        g_tcp_client_connected[idx] = false;
++        g_tcp_stats.clients_disconnected++;
++      }
+       if (_raw_rx_pos[idx]) _raw_rx_pos[idx] = 0;
+       continue;
+     }
++    g_tcp_client_connected[idx] = true;
+ 
+     while (client.available()) {
+       int c = client.read();
+@@ -656,43 +885,72 @@ void MyMesh::handleRawPacketServer() {
+         bool ok = parseRS232BridgePacket(_raw_rx_buffer[idx], _raw_rx_pos[idx], idx);
+         _raw_rx_pos[idx] = 0;
+         if (!ok) {
++          g_tcp_stats.rx_parse_errors++;
+           // drop and reset
+           continue;
+         }
+       }
+     }
+   }
++
++  uint32_t active_clients = 0;
++  for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
++    if (_raw_packet_clients[i].connected()) active_clients++;
++  }
++  if (active_clients > g_tcp_stats.max_simultaneous_clients) {
++    g_tcp_stats.max_simultaneous_clients = active_clients;
++  }
+ }
+ 
+ bool MyMesh::parseRS232BridgePacket(const uint8_t* buffer, int len, int client_idx) {
+-  if (len < 6) return false;
+-  if (buffer[0] != 0xC0 || buffer[1] != 0x3E) return false;
++  if (len < 6) {
++    g_tcp_stats.rx_parse_errors++;
++    return false;
++  }
++  if (buffer[0] != 0xC0 || buffer[1] != 0x3E) {
++    g_tcp_stats.rx_parse_errors++;
++    return false;
++  }
+ 
+   uint16_t payload_len = ((uint16_t)buffer[2] << 8) | buffer[3];
+   int needed = 4 + payload_len + 2; // header + payload + checksum
+ 
+-  if (payload_len > (MAX_TRANS_UNIT + 1)) return false;
+-  if (len < needed) return false;
+-  if (len > needed && buffer[needed] != '\n') return false; // allow optional trailing newline only
++  if (payload_len > (MAX_TRANS_UNIT + 1)) {
++    g_tcp_stats.rx_parse_errors++;
++    return false;
++  }
++  if (len < needed) {
++    g_tcp_stats.rx_parse_errors++;
++    return false;
++  }
++  if (len > needed && buffer[needed] != '\n') {
++    g_tcp_stats.rx_parse_errors++;
++    return false; // allow optional trailing newline only
++  }
+ 
+   uint16_t rx_checksum = ((uint16_t)buffer[4 + payload_len] << 8) | buffer[5 + payload_len];
+   uint16_t calc_checksum = fletcher16(buffer + 4, payload_len);
+   if (rx_checksum != calc_checksum) {
++    g_tcp_stats.rx_checksum_errors++;
+     Serial.printf("[TCP] Bad checksum from client %d (got 0x%04X, want 0x%04X)\n", client_idx, rx_checksum, calc_checksum);
+     return false;
+   }
+ 
+   mesh::Packet* pkt = _mgr->allocNew();
+   if (!pkt) {
++    g_tcp_stats.rx_parse_errors++;
+     Serial.println("[TCP] Failed to alloc packet");
+     return false;
+   }
+   if (!pkt->readFrom(buffer + 4, payload_len)) {
+     _mgr->free(pkt);
++    g_tcp_stats.rx_parse_errors++;
+     Serial.println("[TCP] Failed to parse packet");
+     return false;
+   }
+ 
++  g_tcp_stats.rx_frames++;
++  g_tcp_stats.rx_bytes += payload_len;
+   displayReceivedPacket(buffer + 4, payload_len);
+   sendFlood(pkt);
+   return true;
+@@ -706,6 +964,8 @@ void MyMesh::sendPacketToTcpClients(const uint8_t* payload, int len) {
+ void MyMesh::sendRS232BridgeFrameToTcp(const uint8_t* payload, int len) {
+   if (!_raw_packet_server) return;
+   uint16_t checksum = fletcher16(payload, len);
++  g_tcp_stats.tx_frames++;
++  g_tcp_stats.tx_bytes += len;
+ 
+   uint8_t header[4] = {0xC0, 0x3E, (uint8_t)(len >> 8), (uint8_t)(len & 0xFF)};
+ 
+@@ -715,11 +975,19 @@ void MyMesh::sendRS232BridgeFrameToTcp(const uint8_t* payload, int len) {
+       if (client) client.stop();
+       continue;
+     }
+-    client.write(header, 4);
+-    client.write(payload, len);
+-    client.write((uint8_t)((checksum >> 8) & 0xFF));
+-    client.write((uint8_t)(checksum & 0xFF));
+-    client.write('\n');
++    size_t sent = 0;
++    sent += client.write(header, 4);
++    sent += client.write(payload, len);
++    sent += client.write((uint8_t)((checksum >> 8) & 0xFF));
++    sent += client.write((uint8_t)(checksum & 0xFF));
++    sent += client.write('\n');
++
++    size_t wanted = (size_t)(len + 7);
++    if (sent == wanted) {
++      g_tcp_stats.tx_deliveries++;
++    } else {
++      g_tcp_stats.tx_delivery_failures++;
++    }
+   }
+ }
+ 

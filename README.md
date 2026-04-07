@@ -5,7 +5,7 @@ This repository provides a wrapper build system and patch set for building custo
 It supports two target roles:
 
 - Companion radio: LoRa mesh packets bridged over WiFi TCP on port `5002`
-- Repeater: the same TCP bridge on port `5002`, plus a remote CLI console on port `5001`
+- Repeater: the same TCP bridge on port `5002`, plus a remote CLI console on port `5001` and HTTP stats on port `80`
 - Repeater with console mirror: optional read-only mirror of the console output on port `5003`
 
 ## Overview
@@ -163,6 +163,7 @@ If the device boots successfully, you should see log lines similar to:
 ```text
 [TCP] Raw packet server started on <ip>:5002
 [CONSOLE] TCP console started on <ip>:5001
+[HTTP] Stats endpoint started on http://<ip>:80/stats
 [CONSOLE] TCP mirror started on <ip>:5003
 ```
 
@@ -223,6 +224,7 @@ Default network ports:
 
 - `5002`: raw bridge
 - `5001`: interactive console
+- `80`: HTTP JSON stats (`/stats`, `/stats.json`)
 
 ### Repeater with console mirror
 
@@ -236,6 +238,7 @@ Default network ports:
 - `5002`: raw bridge
 - `5001`: interactive console
 - `5003`: read-only console mirror
+- `80`: HTTP JSON stats (`/stats`, `/stats.json`)
 
 ## Build Script Behavior
 
@@ -303,8 +306,10 @@ The build uses `config.env`. The most important settings are listed below.
 | `WIFI_PASSWORD` | `YourNetworkPassword` | WiFi password |
 | `TCP_PORT` | `5002` | Raw packet bridge port |
 | `CONSOLE_PORT` | `5001` | Repeater console port |
+| `HTTP_STATS_PORT` | `80` | Repeater HTTP stats endpoint port |
 | `CONSOLE_MIRROR_PORT` | `5003` | Repeater console mirror port |
 | `WIFI_DEBUG_LOGGING` | `1` | Enable WiFi-related serial logging |
+| `MQTT_REPORTING_ENABLED` | `0` | Include MQTT reporting flag in firmware (`mqtt.enabled` in stats JSON) |
 
 ### LoRa radio
 
@@ -385,6 +390,21 @@ Example:
 
 ```bash
 nc <device-ip> 5003
+```
+
+### HTTP stats: port 80
+
+This endpoint is available in repeater builds and returns JSON with:
+
+- `radio` runtime counters and signal/airtime values,
+- `mqtt` status/counters (for MQTT-enabled builds),
+- `tcp` traffic/client counters.
+
+Examples:
+
+```bash
+curl http://<device-ip>/stats
+curl http://<device-ip>/stats.json
 ```
 
 ## RS232Bridge Protocol

@@ -29,7 +29,9 @@ WIFI_SSID="YourNetwork"
 WIFI_PASSWORD="YourPassword"
 TCP_PORT=5002
 CONSOLE_PORT=5001
+HTTP_STATS_PORT=80
 WIFI_DEBUG_LOGGING=1
+MQTT_REPORTING_ENABLED=0
 
 # LoRa radio flags
 LORA_FREQ=869.618
@@ -96,7 +98,9 @@ WIFI_SSID="${WIFI_SSID:-YourNetwork}"
 WIFI_PASSWORD="${WIFI_PASSWORD:-YourPassword}"
 TCP_PORT=${TCP_PORT:-5002}
 CONSOLE_PORT=${CONSOLE_PORT:-5001}
+HTTP_STATS_PORT=${HTTP_STATS_PORT:-80}
 WIFI_DEBUG_LOGGING=${WIFI_DEBUG_LOGGING:-1}
+MQTT_REPORTING_ENABLED=${MQTT_REPORTING_ENABLED:-0}
 
 LORA_FREQ=${LORA_FREQ:-869.618}
 LORA_BW=${LORA_BW:-62.5}
@@ -370,6 +374,7 @@ PORTS BY CONFIGURATION:
             TCP_PORT (default 5002)      Serial@TCP endpoint (raw packet stream)
             CONSOLE_PORT (default 5001)  Repeater configuration/admin console
             Mirror 5003                  USB console mirror exposed via TCP (only with --with-console-mirror; useful for MQTT with https://analyzer.letsmesh.net/observer/onboard)
+            HTTP_STATS_PORT (default 80) HTTP JSON stats endpoint (/stats, /stats.json)
 
 EXPOSURE DIFFERENCES (Companion vs Repeater):
         Companion:
@@ -381,6 +386,7 @@ EXPOSURE DIFFERENCES (Companion vs Repeater):
             - 5002: serial@tcp (raw packets)
             - 5001: repeater configuration/admin console
             - 5003: optional USB console mirror over TCP (legacy, only when patch is enabled; useful for MQTT with https://analyzer.letsmesh.net/observer/onboard)
+            - 80: HTTP JSON stats (radio + mqtt + tcp)
 
 CONFIG SOURCE:
     Values are read from config.env (WiFi, LoRa, ports, credentials, debug flags).
@@ -406,7 +412,9 @@ compose_platformio_build_flags() {
     flags="${flags} -D WIFI_PWD='\"${WIFI_PASSWORD}\"'"
     flags="${flags} -D TCP_PORT=${TCP_PORT}"
     flags="${flags} -D CONSOLE_PORT=${CONSOLE_PORT}"
+    flags="${flags} -D HTTP_STATS_PORT=${HTTP_STATS_PORT}"
     flags="${flags} -D WIFI_DEBUG_LOGGING=${WIFI_DEBUG_LOGGING}"
+    flags="${flags} -D MQTT_REPORTING_ENABLED=${MQTT_REPORTING_ENABLED}"
 
     flags="${flags} -D LORA_FREQ=${LORA_FREQ}"
     flags="${flags} -D LORA_BW=${LORA_BW}"
@@ -954,6 +962,7 @@ show_summary() {
     if [ "${BUILD_ROLE}" = "repeater" ]; then
         echo -e "  TCP Port:     ${TCP_PORT} (serial@tcp / raw packet stream)"
         echo -e "  Console Port: ${CONSOLE_PORT} (repeater configuration/admin console)"
+        echo -e "  Stats Port:   ${HTTP_STATS_PORT} (HTTP JSON stats at /stats)"
         echo -e "  Mirror 5003:  $([ "${ENABLE_CONSOLE_MIRROR_PATCH}" = "1" ] && echo enabled || echo disabled) (USB console mirror over TCP, useful for MQTT with https://analyzer.letsmesh.net/observer/onboard)"
     else
         echo -e "  TCP Port:     ${TCP_PORT} (serial@tcp endpoint)"
