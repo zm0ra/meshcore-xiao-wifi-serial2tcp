@@ -1,30 +1,11 @@
+diff --git a/examples/simple_repeater/MyMesh.cpp b/examples/simple_repeater/MyMesh.cpp
+index f0eb6b7..26f89ca 100644
 --- a/examples/simple_repeater/MyMesh.cpp
 +++ b/examples/simple_repeater/MyMesh.cpp
-@@ -1,6 +1,13 @@
- #include "MyMesh.h"
- #include <algorithm>
-+#include <cctype>
- #include <cstring>
-+#include <ctime>
-+#if defined(ESP32)
-+  #include "mqtt_client.h"
-+extern "C" esp_err_t arduino_esp_crt_bundle_attach(void *conf) __attribute__((weak));
-+extern "C" esp_err_t esp_crt_bundle_attach(void *conf) __attribute__((weak));
-+#endif
- 
- /* ------------------------------ Config -------------------------------- */
- 
-@@ -41,6 +49,125 @@
+@@ -41,6 +41,14 @@
    #define WIFI_PASSWORD ""
  #endif
  
-+#ifndef CONSOLE_PORT
-+  #define CONSOLE_PORT 5001
-+#endif
-+#ifndef CONSOLE_MIRROR_PORT
-+  #define CONSOLE_MIRROR_PORT 5003
-+#endif
-+
 +#ifndef HTTP_STATS_PORT
 +  #define HTTP_STATS_PORT 80
 +#endif
@@ -32,115 +13,11 @@
 +#ifndef MQTT_REPORTING_ENABLED
 +  #define MQTT_REPORTING_ENABLED 0
 +#endif
-+#ifndef MQTT_HOST
-+  #define MQTT_HOST ""
-+#endif
-+#ifndef MQTT_PORT
-+  #define MQTT_PORT 1883
-+#endif
-+#ifndef MQTT_KEEPALIVE
-+  #define MQTT_KEEPALIVE 60
-+#endif
-+#ifndef MQTT_TRANSPORT
-+  #define MQTT_TRANSPORT "tcp"
-+#endif
-+#ifndef MQTT_WS_PATH
-+  #define MQTT_WS_PATH "/"
-+#endif
-+#ifndef MQTT_TLS_ENABLED
-+  #define MQTT_TLS_ENABLED 0
-+#endif
-+#ifndef MQTT_TLS_VERIFY
-+  #define MQTT_TLS_VERIFY 1
-+#endif
-+#ifndef MQTT_AUTH_METHOD
-+  #define MQTT_AUTH_METHOD "none"
-+#endif
-+#ifndef MQTT_USERNAME
-+  #define MQTT_USERNAME ""
-+#endif
-+#ifndef MQTT_PASSWORD
-+  #define MQTT_PASSWORD ""
-+#endif
-+#ifndef MQTT_CLIENT_ID
-+  #define MQTT_CLIENT_ID ""
-+#endif
-+#ifndef MQTT_AUDIENCE
-+  #define MQTT_AUDIENCE ""
-+#endif
-+#ifndef MQTT_OWNER
-+  #define MQTT_OWNER ""
-+#endif
-+#ifndef MQTT_EMAIL
-+  #define MQTT_EMAIL ""
-+#endif
-+#ifndef MQTT_IATA
-+  #define MQTT_IATA "XXX"
-+#endif
-+#ifndef MQTT_TOPIC_STATUS
-+  #define MQTT_TOPIC_STATUS "meshcore/{IATA}/{PUBLIC_KEY}/status"
-+#endif
-+#ifndef MQTT_TOPIC_PACKETS
-+  #define MQTT_TOPIC_PACKETS "meshcore/{IATA}/{PUBLIC_KEY}/packets"
-+#endif
-+#ifndef MQTT_TOPIC_RAW
-+  #define MQTT_TOPIC_RAW "meshcore/{IATA}/{PUBLIC_KEY}/raw"
-+#endif
-+#ifndef MQTT_LETSMESH_US_ENABLED
-+  #define MQTT_LETSMESH_US_ENABLED 1
-+#endif
-+#ifndef MQTT_LETSMESH_EU_ENABLED
-+  #define MQTT_LETSMESH_EU_ENABLED 1
-+#endif
-+#ifndef MQTT_EXTRA_ENABLED
-+  #define MQTT_EXTRA_ENABLED 1
-+#endif
-+#ifndef MQTT_EXTRA_HOST
-+  #define MQTT_EXTRA_HOST "172.30.250.10"
-+#endif
-+#ifndef MQTT_EXTRA_PORT
-+  #define MQTT_EXTRA_PORT 1883
-+#endif
-+#ifndef MQTT_EXTRA_KEEPALIVE
-+  #define MQTT_EXTRA_KEEPALIVE 60
-+#endif
-+#ifndef MQTT_EXTRA_TRANSPORT
-+  #define MQTT_EXTRA_TRANSPORT "tcp"
-+#endif
-+#ifndef MQTT_EXTRA_WS_PATH
-+  #define MQTT_EXTRA_WS_PATH "/"
-+#endif
-+#ifndef MQTT_EXTRA_TLS_ENABLED
-+  #define MQTT_EXTRA_TLS_ENABLED 0
-+#endif
-+#ifndef MQTT_EXTRA_TLS_VERIFY
-+  #define MQTT_EXTRA_TLS_VERIFY 1
-+#endif
-+#ifndef MQTT_EXTRA_AUTH_METHOD
-+  #define MQTT_EXTRA_AUTH_METHOD "password"
-+#endif
-+#ifndef MQTT_EXTRA_USERNAME
-+  #define MQTT_EXTRA_USERNAME "mc"
-+#endif
-+#ifndef MQTT_EXTRA_PASSWORD
-+  #define MQTT_EXTRA_PASSWORD "mc"
-+#endif
-+#ifndef MQTT_EXTRA_CLIENT_ID
-+  #define MQTT_EXTRA_CLIENT_ID ""
-+#endif
-+#ifndef MQTT_EXTRA_AUDIENCE
-+  #define MQTT_EXTRA_AUDIENCE ""
-+#endif
-+#ifndef MQTT_EXTRA_OWNER
-+  #define MQTT_EXTRA_OWNER ""
-+#endif
-+#ifndef MQTT_EXTRA_EMAIL
-+  #define MQTT_EXTRA_EMAIL ""
-+#endif
++
  #ifndef SERVER_RESPONSE_DELAY
    #define SERVER_RESPONSE_DELAY 300
  #endif
-@@ -69,6 +148,27 @@
+@@ -69,6 +77,37 @@
  #define LAZY_CONTACTS_WRITE_DELAY    5000
  
  #if defined(ESP32)
@@ -159,23 +36,6 @@
 +  uint32_t tx_delivery_failures;
 +};
 +
-+static TcpRuntimeStats g_tcp_stats = {};
-+static WiFiServer* g_http_stats_server = NULL;
-+static uint32_t g_http_requests_total = 0;
-+static uint32_t g_http_not_found = 0;
-+static bool g_tcp_client_connected[MAX_TCP_CLIENTS] = {false};
-+
- static uint16_t fletcher16(const uint8_t* data, size_t len) {
-   uint16_t sum1 = 0;
-   uint16_t sum2 = 0;
-@@ -77,7 +177,644 @@
-     sum2 = (sum2 + sum1) % 255;
-   }
-   return (sum2 << 8) | sum1;
- }
- #endif
-+
-+#if defined(ESP32) && MQTT_REPORTING_ENABLED
 +struct MqttRuntimeStats {
 +  bool connected;
 +  uint32_t connect_attempts;
@@ -185,669 +45,20 @@
 +  int32_t last_error_code;
 +};
 +
-+struct MqttBrokerProfile {
-+  const char* name;
-+  const char* host;
-+  uint16_t port;
-+  const char* transport;
-+  const char* ws_path;
-+  bool tls_enabled;
-+  bool tls_verify;
-+  uint16_t keepalive;
-+  const char* auth_method;
-+  const char* username;
-+  const char* password;
-+  const char* client_id;
-+  const char* audience;
-+  const char* owner;
-+  const char* email;
-+};
-+
++static TcpRuntimeStats g_tcp_stats = {};
 +static MqttRuntimeStats g_mqtt_stats = {};
-+static esp_mqtt_client_handle_t g_mqtt_client = NULL;
-+static bool g_mqtt_started = false;
-+static bool g_mqtt_seen_connected = false;
-+static bool g_mqtt_prev_connected = false;
-+static bool g_mqtt_needs_reconnect = true;
-+static uint32_t g_mqtt_next_reconnect_at = 0;
-+static uint32_t g_mqtt_backoff_ms = 1000;
-+static uint32_t g_mqtt_connect_started_at = 0;
-+static char g_mqtt_node_pub_hex[65] = {0};
-+static char g_mqtt_node_pub_hex_upper[65] = {0};
-+static char g_mqtt_origin_name[40] = {0};
-+static char g_mqtt_topic_status[128] = {0};
-+static char g_mqtt_topic_packets[128] = {0};
-+static char g_mqtt_topic_raw[128] = {0};
-+static char g_mqtt_uri[192] = {0};
-+static char g_mqtt_client_id[96] = {0};
-+static char g_mqtt_username[96] = {0};
-+static char g_mqtt_password[768] = {0};
-+static char g_mqtt_lwt_payload[320] = {0};
-+static int g_mqtt_active_profile = -1;
-+static int g_mqtt_last_profile = -1;
-+static char g_mqtt_active_profile_name[24] = {0};
-+static char g_mqtt_active_host[96] = {0};
-+static const char* kMqttClientVersion = "meshcore-esp32-repeater";
-+static const char* kLetsMeshUsHost = "mqtt-us-v1.letsmesh.net";
-+static const char* kLetsMeshEuHost = "mqtt-eu-v1.letsmesh.net";
-+static const char kLetsMeshGoogleCaPem[] PROGMEM =
-+  "-----BEGIN CERTIFICATE-----\n"
-+  "MIICnzCCAiWgAwIBAgIQf/MZd5csIkp2FV0TttaF4zAKBggqhkjOPQQDAzBHMQsw\n"
-+  "CQYDVQQGEwJVUzEiMCAGA1UEChMZR29vZ2xlIFRydXN0IFNlcnZpY2VzIExMQzEU\n"
-+  "MBIGA1UEAxMLR1RTIFJvb3QgUjQwHhcNMjMxMjEzMDkwMDAwWhcNMjkwMjIwMTQw\n"
-+  "MDAwWjA7MQswCQYDVQQGEwJVUzEeMBwGA1UEChMVR29vZ2xlIFRydXN0IFNlcnZp\n"
-+  "Y2VzMQwwCgYDVQQDEwNXRTEwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARvzTr+\n"
-+  "Z1dHTCEDhUDCR127WEcPQMFcF4XGGTfn1XzthkubgdnXGhOlCgP4mMTG6J7/EFmP\n"
-+  "LCaY9eYmJbsPAvpWo4H+MIH7MA4GA1UdDwEB/wQEAwIBhjAdBgNVHSUEFjAUBggr\n"
-+  "BgEFBQcDAQYIKwYBBQUHAwIwEgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHQ4EFgQU\n"
-+  "kHeSNWfE/6jMqeZ72YB5e8yT+TgwHwYDVR0jBBgwFoAUgEzW63T/STaj1dj8tT7F\n"
-+  "avCUHYwwNAYIKwYBBQUHAQEEKDAmMCQGCCsGAQUFBzAChhhodHRwOi8vaS5wa2ku\n"
-+  "Z29vZy9yNC5jcnQwKwYDVR0fBCQwIjAgoB6gHIYaaHR0cDovL2MucGtpLmdvb2cv\n"
-+  "ci9yNC5jcmwwEwYDVR0gBAwwCjAIBgZngQwBAgEwCgYIKoZIzj0EAwMDaAAwZQIx\n"
-+  "AOcCq1HW90OVznX+0RGU1cxAQXomvtgM8zItPZCuFQ8jSBJSjz5keROv9aYsAm5V\n"
-+  "sQIwJonMaAFi54mrfhfoFNZEfuNMSQ6/bIBiNLiyoX46FohQvKeIoJ99cx7sUkFN\n"
-+  "7uJW\n"
-+  "-----END CERTIFICATE-----\n"
-+  "-----BEGIN CERTIFICATE-----\n"
-+  "MIIDejCCAmKgAwIBAgIQf+UwvzMTQ77dghYQST2KGzANBgkqhkiG9w0BAQsFADBX\n"
-+  "MQswCQYDVQQGEwJCRTEZMBcGA1UEChMQR2xvYmFsU2lnbiBudi1zYTEQMA4GA1UE\n"
-+  "CxMHUm9vdCBDQTEbMBkGA1UEAxMSR2xvYmFsU2lnbiBSb290IENBMB4XDTIzMTEx\n"
-+  "NTAzNDMyMVoXDTI4MDEyODAwMDA0MlowRzELMAkGA1UEBhMCVVMxIjAgBgNVBAoT\n"
-+  "GUdvb2dsZSBUcnVzdCBTZXJ2aWNlcyBMTEMxFDASBgNVBAMTC0dUUyBSb290IFI0\n"
-+  "MHYwEAYHKoZIzj0CAQYFK4EEACIDYgAE83Rzp2iLYK5DuDXFgTB7S0md+8Fhzube\n"
-+  "Rr1r1WEYNa5A3XP3iZEwWus87oV8okB2O6nGuEfYKueSkWpz6bFyOZ8pn6KY019e\n"
-+  "WIZlD6GEZQbR3IvJx3PIjGov5cSr0R2Ko4H/MIH8MA4GA1UdDwEB/wQEAwIBhjAd\n"
-+  "BgNVHSUEFjAUBggrBgEFBQcDAQYIKwYBBQUHAwIwDwYDVR0TAQH/BAUwAwEB/zAd\n"
-+  "BgNVHQ4EFgQUgEzW63T/STaj1dj8tT7FavCUHYwwHwYDVR0jBBgwFoAUYHtmGkUN\n"
-+  "l8qJUC99BM00qP/8/UswNgYIKwYBBQUHAQEEKjAoMCYGCCsGAQUFBzAChhpodHRw\n"
-+  "Oi8vaS5wa2kuZ29vZy9nc3IxLmNydDAtBgNVHR8EJjAkMCKgIKAehhxodHRwOi8v\n"
-+  "Yy5wa2kuZ29vZy9yL2dzcjEuY3JsMBMGA1UdIAQMMAowCAYGZ4EMAQIBMA0GCSqG\n"
-+  "SIb3DQEBCwUAA4IBAQAYQrsPBtYDh5bjP2OBDwmkoWhIDDkic574y04tfzHpn+cJ\n"
-+  "odI2D4SseesQ6bDrarZ7C30ddLibZatoKiws3UL9xnELz4ct92vID24FfVbiI1hY\n"
-+  "+SW6FoVHkNeWIP0GCbaM4C6uVdF5dTUsMVs/ZbzNnIdCp5Gxmx5ejvEau8otR/Cs\n"
-+  "kGN+hr/W5GvT1tMBjgWKZ1i4//emhA1JG1BbPzoLJQvyEotc03lXjTaCzv8mEbep\n"
-+  "8RqZ7a2CPsgRbuvTPBwcOMBBmuFeU88+FSBX6+7iP0il8b4Z0QFqIwwMHfs/L6K1\n"
-+  "vepuoxtGzi4CZ68zJpiq1UvSqTbFJjtbD4seiMHl\n"
-+  "-----END CERTIFICATE-----\n";
++static WiFiServer* g_http_stats_server = NULL;
++static bool g_tcp_client_connected[MAX_TCP_CLIENTS] = {false};
++static uint32_t g_http_requests_total = 0;
++static uint32_t g_http_not_found = 0;
 +
-+static bool mqttStrEqNoCase(const char* a, const char* b) {
-+  if (!a || !b) return false;
-+  while (*a && *b) {
-+    if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return false;
-+    ++a;
-+    ++b;
-+  }
-+  return *a == 0 && *b == 0;
-+}
-+
-+static String mqttJsonEscape(const String& in) {
-+  String out;
-+  out.reserve(in.length() + 8);
-+  for (size_t i = 0; i < in.length(); i++) {
-+    char ch = in[i];
-+    switch (ch) {
-+      case '\"': out += "\\\""; break;
-+      case '\\': out += "\\\\"; break;
-+      case '\b': out += "\\b"; break;
-+      case '\f': out += "\\f"; break;
-+      case '\n': out += "\\n"; break;
-+      case '\r': out += "\\r"; break;
-+      case '\t': out += "\\t"; break;
-+      default:
-+        if ((uint8_t)ch < 0x20) out += " ";
-+        else out += ch;
-+        break;
-+    }
-+  }
-+  return out;
-+}
-+
-+static String mqttBytesToHex(const uint8_t* data, size_t len) {
-+  static const char kHex[] = "0123456789ABCDEF";
-+  String out;
-+  out.reserve(len * 2);
-+  for (size_t i = 0; i < len; i++) {
-+    uint8_t b = data[i];
-+    out += kHex[(b >> 4) & 0x0F];
-+    out += kHex[b & 0x0F];
-+  }
-+  return out;
-+}
-+
-+static String mqttBase64UrlEncode(const uint8_t* src, size_t len) {
-+  static const char kTbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-+  String out;
-+  out.reserve(((len + 2) / 3) * 4);
-+  size_t i = 0;
-+  while (i + 2 < len) {
-+    uint32_t n = ((uint32_t)src[i] << 16) | ((uint32_t)src[i + 1] << 8) | (uint32_t)src[i + 2];
-+    out += kTbl[(n >> 18) & 0x3F];
-+    out += kTbl[(n >> 12) & 0x3F];
-+    out += kTbl[(n >> 6) & 0x3F];
-+    out += kTbl[n & 0x3F];
-+    i += 3;
-+  }
-+  if (i < len) {
-+    uint32_t n = ((uint32_t)src[i] << 16);
-+    out += kTbl[(n >> 18) & 0x3F];
-+    if (i + 1 < len) {
-+      n |= ((uint32_t)src[i + 1] << 8);
-+      out += kTbl[(n >> 12) & 0x3F];
-+      out += kTbl[(n >> 6) & 0x3F];
-+    } else {
-+      out += kTbl[(n >> 12) & 0x3F];
-+    }
-+  }
-+  return out;
-+}
-+
-+static String mqttResolveTopicTemplate(const char* templ, const char* iata, const char* pub_hex) {
-+  String out = templ ? String(templ) : String();
-+  if (out.length() == 0) return out;
-+  out.replace("{IATA}", iata ? String(iata) : String("XXX"));
-+  out.replace("{PUBLIC_KEY}", pub_hex ? String(pub_hex) : String("UNKNOWN"));
-+  return out;
-+}
-+
-+static void mqttBuildTimeFields(uint32_t epoch, String& iso, String& time_only, String& date_only) {
-+  DateTime dt(epoch);
-+  char tbuf[12];
-+  char dbuf[16];
-+  char ibuf[32];
-+  snprintf(tbuf, sizeof(tbuf), "%02d:%02d:%02d", dt.hour(), dt.minute(), dt.second());
-+  snprintf(dbuf, sizeof(dbuf), "%d/%d/%d", dt.day(), dt.month(), dt.year());
-+  snprintf(ibuf, sizeof(ibuf), "%04d-%02d-%02dT%02d:%02d:%02dZ", dt.year(), dt.month(), dt.day(), dt.hour(), dt.minute(), dt.second());
-+  iso = String(ibuf);
-+  time_only = String(tbuf);
-+  date_only = String(dbuf);
-+}
-+
-+static String mqttBuildStatusJson(const char* status, uint32_t now_epoch) {
-+  String iso;
-+  String t;
-+  String d;
-+  mqttBuildTimeFields(now_epoch, iso, t, d);
-+
-+  String payload;
-+  payload.reserve(512);
-+  payload += "{";
-+  payload += "\"status\":\"" + mqttJsonEscape(String(status ? status : "unknown")) + "\",";
-+  payload += "\"timestamp\":\"" + mqttJsonEscape(iso) + "\",";
-+  payload += "\"origin\":\"" + mqttJsonEscape(String(g_mqtt_origin_name)) + "\",";
-+  payload += "\"origin_id\":\"" + mqttJsonEscape(String(g_mqtt_node_pub_hex_upper)) + "\",";
-+  payload += "\"radio\":\"unknown\",";
-+  payload += "\"model\":\"unknown\",";
-+  payload += "\"firmware_version\":\"" + mqttJsonEscape(String(FIRMWARE_VERSION)) + "\",";
-+  payload += "\"client_version\":\"" + mqttJsonEscape(String(kMqttClientVersion)) + "\"";
-+  payload += "}";
-+  return payload;
-+}
-+
-+static String mqttBuildJwtToken(const mesh::LocalIdentity& self_id, uint32_t now_epoch,
-+                                const char* audience, const char* owner, const char* email_in,
-+                                bool include_owner_email) {
-+  uint32_t base_epoch = now_epoch;
-+  if (base_epoch < 946684800UL) {
-+    base_epoch = 946684800UL + (millis() / 1000UL);
-+  }
-+  uint32_t exp_epoch = base_epoch + 3600UL;
-+
-+  const String header = "{\"alg\":\"Ed25519\",\"typ\":\"JWT\"}";
-+  String payload = "{\"publicKey\":\"";
-+  payload += String(g_mqtt_node_pub_hex_upper);
-+  payload += "\",\"iat\":";
-+  payload += String((unsigned long)base_epoch);
-+  payload += ",\"exp\":";
-+  payload += String((unsigned long)exp_epoch);
-+  if (audience && audience[0]) payload += ",\"aud\":\"" + mqttJsonEscape(String(audience)) + "\"";
-+  if (include_owner_email) {
-+    if (owner && owner[0]) payload += ",\"owner\":\"" + mqttJsonEscape(String(owner)) + "\"";
-+    if (email_in && email_in[0]) {
-+      String email = String(email_in);
-+      email.toLowerCase();
-+      payload += ",\"email\":\"" + mqttJsonEscape(email) + "\"";
-+    }
-+  }
-+  payload += ",\"client\":\"" + mqttJsonEscape(String(kMqttClientVersion)) + "\"}";
-+
-+  String header_b64 = mqttBase64UrlEncode((const uint8_t*)header.c_str(), header.length());
-+  String payload_b64 = mqttBase64UrlEncode((const uint8_t*)payload.c_str(), payload.length());
-+  String to_sign = header_b64 + "." + payload_b64;
-+
-+  uint8_t sig[SIGNATURE_SIZE];
-+  self_id.sign(sig, (const uint8_t*)to_sign.c_str(), to_sign.length());
-+  // meshcore-decoder expects the JWT signature segment as uppercase HEX, not base64url.
-+  String sig_hex = mqttBytesToHex(sig, SIGNATURE_SIZE);
-+  return to_sign + "." + sig_hex;
-+}
-+
-+static void mqttSetReconnectDelay(uint32_t delay_ms) {
-+  if (delay_ms < 1000) delay_ms = 1000;
-+  if (delay_ms > 120000) delay_ms = 120000;
-+  g_mqtt_next_reconnect_at = millis() + delay_ms;
-+}
-+
-+static int mqttProfileCount() {
-+  int count = 0;
-+  if (MQTT_LETSMESH_US_ENABLED) count++;
-+  if (MQTT_LETSMESH_EU_ENABLED) count++;
-+  if (MQTT_EXTRA_ENABLED && strlen(MQTT_EXTRA_HOST) > 0) count++;
-+  if (strlen(MQTT_HOST) > 0) count++;
-+  return count;
-+}
-+
-+static int mqttNextProfileIndex(int current_index) {
-+  int count = mqttProfileCount();
-+  if (count <= 0) return -1;
-+  if (current_index < 0) return 0;
-+  return (current_index + 1) % count;
-+}
-+
-+static bool mqttResolveProfile(int index, MqttBrokerProfile& profile) {
-+  int i = 0;
-+  if (MQTT_LETSMESH_US_ENABLED) {
-+    if (i == index) {
-+      profile = {
-+        "letsmesh-us", kLetsMeshUsHost, 443, "websockets", "/", true, true, 60,
-+        "token", "", "", "", kLetsMeshUsHost, MQTT_OWNER, MQTT_EMAIL
-+      };
-+      return true;
-+    }
-+    i++;
-+  }
-+  if (MQTT_LETSMESH_EU_ENABLED) {
-+    if (i == index) {
-+      profile = {
-+        "letsmesh-eu", kLetsMeshEuHost, 443, "websockets", "/", true, true, 60,
-+        "token", "", "", "", kLetsMeshEuHost, MQTT_OWNER, MQTT_EMAIL
-+      };
-+      return true;
-+    }
-+    i++;
-+  }
-+  if (MQTT_EXTRA_ENABLED && strlen(MQTT_EXTRA_HOST) > 0) {
-+    if (i == index) {
-+      profile = {
-+        "extra", MQTT_EXTRA_HOST, (uint16_t)MQTT_EXTRA_PORT, MQTT_EXTRA_TRANSPORT, MQTT_EXTRA_WS_PATH,
-+        MQTT_EXTRA_TLS_ENABLED, MQTT_EXTRA_TLS_VERIFY, (uint16_t)MQTT_EXTRA_KEEPALIVE,
-+        MQTT_EXTRA_AUTH_METHOD, MQTT_EXTRA_USERNAME, MQTT_EXTRA_PASSWORD, MQTT_EXTRA_CLIENT_ID,
-+        MQTT_EXTRA_AUDIENCE, MQTT_EXTRA_OWNER, MQTT_EXTRA_EMAIL
-+      };
-+      return true;
-+    }
-+    i++;
-+  }
-+  if (strlen(MQTT_HOST) > 0) {
-+    if (i == index) {
-+      profile = {
-+        "custom", MQTT_HOST, (uint16_t)MQTT_PORT, MQTT_TRANSPORT, MQTT_WS_PATH,
-+        MQTT_TLS_ENABLED, MQTT_TLS_VERIFY, (uint16_t)MQTT_KEEPALIVE,
-+        MQTT_AUTH_METHOD, MQTT_USERNAME, MQTT_PASSWORD, MQTT_CLIENT_ID,
-+        MQTT_AUDIENCE, MQTT_OWNER, MQTT_EMAIL
-+      };
-+      return true;
-+    }
-+  }
-+  return false;
-+}
-+
-+static void mqttStopClient() {
-+  if (!g_mqtt_client) return;
-+  if (g_mqtt_started) {
-+    esp_mqtt_client_stop(g_mqtt_client);
-+  }
-+  esp_mqtt_client_destroy(g_mqtt_client);
-+  g_mqtt_client = NULL;
-+  g_mqtt_started = false;
-+  g_mqtt_stats.connected = false;
-+}
-+
-+static bool mqttPublish(const char* topic, const String& payload, bool retain = false) {
-+  if (!g_mqtt_client || !g_mqtt_stats.connected || !topic || topic[0] == 0) {
-+    g_mqtt_stats.publish_fail++;
-+    return false;
-+  }
-+  int msg_id = esp_mqtt_client_enqueue(g_mqtt_client, topic, payload.c_str(), payload.length(), 0, retain ? 1 : 0, true);
-+  if (msg_id < 0) {
-+    g_mqtt_stats.publish_fail++;
-+    Serial.printf("[MQTT] Publish failed: %s\n", topic);
-+    return false;
-+  }
-+  g_mqtt_stats.publish_ok++;
-+  return true;
-+}
-+
-+static void mqttPublishStatus(const char* status, uint32_t now_epoch, bool retain) {
-+  if (!g_mqtt_topic_status[0]) return;
-+  String payload = mqttBuildStatusJson(status, now_epoch);
-+  mqttPublish(g_mqtt_topic_status, payload, retain);
-+}
-+
-+static void mqttPublishRawFrame(const uint8_t* raw, int len, uint32_t now_epoch) {
-+  if (!raw || len <= 0 || !g_mqtt_topic_raw[0]) return;
-+  String iso;
-+  String t;
-+  String d;
-+  mqttBuildTimeFields(now_epoch, iso, t, d);
-+
-+  String payload;
-+  payload.reserve(len * 2 + 256);
-+  payload += "{";
-+  payload += "\"origin\":\"" + mqttJsonEscape(String(g_mqtt_origin_name)) + "\",";
-+  payload += "\"origin_id\":\"" + mqttJsonEscape(String(g_mqtt_node_pub_hex_upper)) + "\",";
-+  payload += "\"timestamp\":\"" + mqttJsonEscape(iso) + "\",";
-+  payload += "\"type\":\"RAW\",";
-+  payload += "\"time\":\"" + mqttJsonEscape(t) + "\",";
-+  payload += "\"date\":\"" + mqttJsonEscape(d) + "\",";
-+  payload += "\"raw\":\"" + mqttBytesToHex(raw, (size_t)len) + "\"";
-+  payload += "}";
-+  mqttPublish(g_mqtt_topic_raw, payload, false);
-+}
-+
-+static void mqttPublishMeshPacket(const mesh::Packet* pkt, int len, const char* direction, float score, bool include_rx_metrics, int last_snr, int last_rssi, uint32_t now_epoch) {
-+  if (!pkt || !g_mqtt_topic_packets[0]) return;
-+
-+  uint8_t raw_buf[MAX_TRANS_UNIT + 4];
-+  int raw_len = pkt->writeTo(raw_buf);
-+  if (raw_len <= 0) return;
-+
-+  uint8_t hash[MAX_HASH_SIZE];
-+  pkt->calculatePacketHash(hash);
-+  char hash_hex[MAX_HASH_SIZE * 2 + 1];
-+  mesh::Utils::toHex(hash_hex, hash, MAX_HASH_SIZE);
-+
-+  String iso;
-+  String t;
-+  String d;
-+  mqttBuildTimeFields(now_epoch, iso, t, d);
-+
-+  String payload;
-+  payload.reserve(raw_len * 2 + 512);
-+  String dir = direction ? String(direction) : String("rx");
-+  dir.toLowerCase();
-+  payload += "{";
-+  payload += "\"origin\":\"" + mqttJsonEscape(String(g_mqtt_origin_name)) + "\",";
-+  payload += "\"origin_id\":\"" + mqttJsonEscape(String(g_mqtt_node_pub_hex_upper)) + "\",";
-+  payload += "\"timestamp\":\"" + mqttJsonEscape(iso) + "\",";
-+  payload += "\"type\":\"PACKET\",";
-+  payload += "\"direction\":\"" + mqttJsonEscape(dir) + "\",";
-+  payload += "\"time\":\"" + mqttJsonEscape(t) + "\",";
-+  payload += "\"date\":\"" + mqttJsonEscape(d) + "\",";
-+  payload += "\"len\":\"" + String(len) + "\",";
-+  payload += "\"packet_type\":\"" + String((unsigned int)pkt->getPayloadType()) + "\",";
-+  payload += "\"route\":\"" + String(pkt->isRouteDirect() ? "D" : "F") + "\",";
-+  payload += "\"payload_len\":\"" + String((unsigned int)pkt->payload_len) + "\",";
-+  payload += "\"raw\":\"" + mqttBytesToHex(raw_buf, (size_t)raw_len) + "\",";
-+  payload += "\"hash\":\"" + String(hash_hex) + "\"";
-+  if (include_rx_metrics) {
-+    payload += ",\"SNR\":\"" + String((int)last_snr) + "\"";
-+    payload += ",\"RSSI\":\"" + String((int)last_rssi) + "\"";
-+    payload += ",\"score\":\"" + String((int)(score * 1000.0f)) + "\"";
-+  }
-+  payload += "}";
-+  mqttPublish(g_mqtt_topic_packets, payload, false);
-+}
-+
-+static void mqttEventHandler(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data) {
-+  (void)handler_args;
-+  (void)base;
-+  esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
-+  switch ((esp_mqtt_event_id_t)event_id) {
-+    case MQTT_EVENT_CONNECTED:
-+      g_mqtt_stats.connected = true;
-+      g_mqtt_stats.last_error_code = 0;
-+      if (g_mqtt_seen_connected) g_mqtt_stats.reconnects++;
-+      g_mqtt_seen_connected = true;
-+      g_mqtt_last_profile = g_mqtt_active_profile;
-+      g_mqtt_connect_started_at = 0;
-+      g_mqtt_backoff_ms = 1000;
-+      httpUiLogf("MQTT connected: %s (%s)",
-+                 g_mqtt_active_profile_name[0] ? g_mqtt_active_profile_name : "unknown",
-+                 g_mqtt_active_host[0] ? g_mqtt_active_host : "-");
-+      break;
-+    case MQTT_EVENT_DISCONNECTED:
-+      g_mqtt_stats.connected = false;
-+      g_mqtt_needs_reconnect = true;
-+      g_mqtt_active_profile = mqttNextProfileIndex(g_mqtt_active_profile);
-+      httpUiLogf("MQTT disconnected: %s", g_mqtt_active_host[0] ? g_mqtt_active_host : "-");
-+      mqttSetReconnectDelay(g_mqtt_backoff_ms);
-+      if (g_mqtt_backoff_ms < 120000) g_mqtt_backoff_ms *= 2;
-+      break;
-+    case MQTT_EVENT_ERROR:
-+      g_mqtt_stats.connected = false;
-+      g_mqtt_needs_reconnect = true;
-+      g_mqtt_active_profile = mqttNextProfileIndex(g_mqtt_active_profile);
-+      if (event && event->error_handle) {
-+        g_mqtt_stats.last_error_code = event->error_handle->esp_tls_last_esp_err;
-+        Serial.printf("[MQTT] Error: type=%d tls_err=0x%X tls_stack=0x%X sock_errno=%d conn_rc=%d\n",
-+                      (int)event->error_handle->error_type,
-+                      (unsigned int)event->error_handle->esp_tls_last_esp_err,
-+                      (unsigned int)event->error_handle->esp_tls_stack_err,
-+                      (int)event->error_handle->esp_transport_sock_errno,
-+                      (int)event->error_handle->connect_return_code);
-+        httpUiLogf("MQTT error tls=0x%X sock=%d rc=%d",
-+                   (unsigned int)event->error_handle->esp_tls_last_esp_err,
-+                   (int)event->error_handle->esp_transport_sock_errno,
-+                   (int)event->error_handle->connect_return_code);
-+      } else {
-+        g_mqtt_stats.last_error_code = -1;
-+        Serial.println("[MQTT] Error: missing error_handle");
-+        httpUiLogf("MQTT error: missing error_handle");
-+      }
-+      mqttSetReconnectDelay(g_mqtt_backoff_ms);
-+      if (g_mqtt_backoff_ms < 120000) g_mqtt_backoff_ms *= 2;
-+      break;
-+    default:
-+      break;
-+  }
-+}
-+
-+static bool mqttStartClient(const mesh::LocalIdentity& self_id, const char* origin_name, uint32_t now_epoch) {
-+  if (g_mqtt_active_profile < 0) g_mqtt_active_profile = mqttNextProfileIndex(-1);
-+
-+  MqttBrokerProfile profile = {};
-+  if (g_mqtt_active_profile < 0 || !mqttResolveProfile(g_mqtt_active_profile, profile) || !profile.host || profile.host[0] == 0) {
-+    mqttStopClient();
-+    return false;
-+  }
-+
-+  mesh::Utils::toHex(g_mqtt_node_pub_hex, self_id.pub_key, PUB_KEY_SIZE);
-+  memset(g_mqtt_node_pub_hex_upper, 0, sizeof(g_mqtt_node_pub_hex_upper));
-+  for (size_t i = 0; i < sizeof(g_mqtt_node_pub_hex_upper) - 1; i++) {
-+    char ch = g_mqtt_node_pub_hex[i];
-+    if (ch == 0) break;
-+    g_mqtt_node_pub_hex_upper[i] = (char)toupper((unsigned char)ch);
-+  }
-+  StrHelper::strncpy(g_mqtt_origin_name, origin_name ? origin_name : "unknown", sizeof(g_mqtt_origin_name));
-+
-+  String iata = String(MQTT_IATA);
-+  iata.toUpperCase();
-+  iata.trim();
-+  if (iata.length() > 3) iata = iata.substring(0, 3);
-+  if (iata.length() == 0) iata = "XXX";
-+
-+  String status_t = mqttResolveTopicTemplate(MQTT_TOPIC_STATUS, iata.c_str(), g_mqtt_node_pub_hex_upper);
-+  String packets_t = mqttResolveTopicTemplate(MQTT_TOPIC_PACKETS, iata.c_str(), g_mqtt_node_pub_hex_upper);
-+  String raw_t = mqttResolveTopicTemplate(MQTT_TOPIC_RAW, iata.c_str(), g_mqtt_node_pub_hex_upper);
-+  StrHelper::strncpy(g_mqtt_topic_status, status_t.c_str(), sizeof(g_mqtt_topic_status));
-+  StrHelper::strncpy(g_mqtt_topic_packets, packets_t.c_str(), sizeof(g_mqtt_topic_packets));
-+  StrHelper::strncpy(g_mqtt_topic_raw, raw_t.c_str(), sizeof(g_mqtt_topic_raw));
-+
-+  String transport = String(profile.transport ? profile.transport : "tcp");
-+  transport.toLowerCase();
-+  transport.trim();
-+  if (transport == "ws" || transport == "wss") transport = "websockets";
-+  bool is_ws = (transport == "websockets");
-+
-+  String uri = is_ws ? (profile.tls_enabled ? "wss://" : "ws://") : (profile.tls_enabled ? "mqtts://" : "mqtt://");
-+  uri += String(profile.host);
-+  uri += ":";
-+  uri += String((unsigned int)profile.port);
-+  if (is_ws) {
-+    String ws_path = String(profile.ws_path ? profile.ws_path : "/");
-+    ws_path.trim();
-+    if (ws_path.length() == 0) ws_path = "/";
-+    if (!ws_path.startsWith("/")) ws_path = "/" + ws_path;
-+    uri += ws_path;
-+  }
-+  StrHelper::strncpy(g_mqtt_uri, uri.c_str(), sizeof(g_mqtt_uri));
-+  StrHelper::strncpy(g_mqtt_active_profile_name, profile.name ? profile.name : "unknown", sizeof(g_mqtt_active_profile_name));
-+  StrHelper::strncpy(g_mqtt_active_host, profile.host ? profile.host : "", sizeof(g_mqtt_active_host));
-+
-+  if (profile.client_id && profile.client_id[0]) {
-+    StrHelper::strncpy(g_mqtt_client_id, profile.client_id, sizeof(g_mqtt_client_id));
-+  } else {
-+    String generated_id = "meshcore_" + String(g_mqtt_node_pub_hex_upper);
-+    if (generated_id.length() > 23) generated_id = generated_id.substring(0, 23);
-+    StrHelper::strncpy(g_mqtt_client_id, generated_id.c_str(), sizeof(g_mqtt_client_id));
-+  }
-+
-+  g_mqtt_username[0] = 0;
-+  g_mqtt_password[0] = 0;
-+  String auth = String(profile.auth_method ? profile.auth_method : "none");
-+  auth.toLowerCase();
-+  auth.trim();
-+  if (auth == "password") {
-+    StrHelper::strncpy(g_mqtt_username, profile.username ? profile.username : "", sizeof(g_mqtt_username));
-+    StrHelper::strncpy(g_mqtt_password, profile.password ? profile.password : "", sizeof(g_mqtt_password));
-+  } else if (auth == "token") {
-+    String user = "v1_" + String(g_mqtt_node_pub_hex_upper);
-+    String token = mqttBuildJwtToken(self_id, now_epoch, profile.audience, profile.owner, profile.email,
-+                                     profile.tls_enabled && profile.tls_verify);
-+    StrHelper::strncpy(g_mqtt_username, user.c_str(), sizeof(g_mqtt_username));
-+    StrHelper::strncpy(g_mqtt_password, token.c_str(), sizeof(g_mqtt_password));
-+  }
-+
-+  String offline_payload = mqttBuildStatusJson("offline", now_epoch);
-+  StrHelper::strncpy(g_mqtt_lwt_payload, offline_payload.c_str(), sizeof(g_mqtt_lwt_payload));
-+
-+  mqttStopClient();
-+
-+  esp_mqtt_client_config_t mqtt_cfg = {};
-+  mqtt_cfg.uri = g_mqtt_uri;
-+  mqtt_cfg.client_id = g_mqtt_client_id;
-+  mqtt_cfg.keepalive = profile.keepalive ? profile.keepalive : MQTT_KEEPALIVE;
-+  mqtt_cfg.disable_auto_reconnect = true;
-+  mqtt_cfg.skip_cert_common_name_check = profile.tls_enabled && !profile.tls_verify;
-+  if (profile.tls_enabled && profile.tls_verify) {
-+    if (arduino_esp_crt_bundle_attach) {
-+      mqtt_cfg.crt_bundle_attach = arduino_esp_crt_bundle_attach;
-+    } else if (esp_crt_bundle_attach) {
-+      mqtt_cfg.crt_bundle_attach = esp_crt_bundle_attach;
-+    } else if (strstr(profile.host, "letsmesh.net") != nullptr) {
-+      mqtt_cfg.cert_pem = kLetsMeshGoogleCaPem;
-+      Serial.println("[MQTT] Using built-in LetsMesh CA chain");
-+    } else {
-+      Serial.println("[MQTT] Warning: no certificate bundle symbol available (set TLS verify off for custom broker)");
-+    }
-+  }
-+  if (g_mqtt_username[0]) mqtt_cfg.username = g_mqtt_username;
-+  if (g_mqtt_password[0]) mqtt_cfg.password = g_mqtt_password;
-+  if (g_mqtt_topic_status[0]) {
-+    mqtt_cfg.lwt_topic = g_mqtt_topic_status;
-+    mqtt_cfg.lwt_msg = g_mqtt_lwt_payload;
-+    mqtt_cfg.lwt_msg_len = strlen(g_mqtt_lwt_payload);
-+    mqtt_cfg.lwt_retain = 1;
-+    mqtt_cfg.lwt_qos = 0;
-+  }
-+
-+  g_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
-+  if (!g_mqtt_client) {
-+    g_mqtt_stats.last_error_code = -2;
-+    httpUiLogf("MQTT init failed: %s", g_mqtt_active_host[0] ? g_mqtt_active_host : "-");
-+    return false;
-+  }
-+
-+  Serial.printf("[MQTT] Starting profile '%s' -> %s\n", profile.name ? profile.name : "unknown", g_mqtt_uri);
-+  httpUiLogf("MQTT connecting: %s (%s)",
-+             g_mqtt_active_profile_name[0] ? g_mqtt_active_profile_name : "unknown",
-+             g_mqtt_active_host[0] ? g_mqtt_active_host : "-");
-+
-+  esp_mqtt_client_register_event(g_mqtt_client, MQTT_EVENT_ANY, mqttEventHandler, NULL);
-+  esp_err_t start_err = esp_mqtt_client_start(g_mqtt_client);
-+  if (start_err != ESP_OK) {
-+    g_mqtt_stats.last_error_code = start_err;
-+    mqttStopClient();
-+    httpUiLogf("MQTT start failed err=%ld", (long)start_err);
-+    return false;
-+  }
-+
-+  g_mqtt_started = true;
-+  g_mqtt_connect_started_at = millis();
-+  g_mqtt_stats.connect_attempts++;
-+  g_mqtt_needs_reconnect = false;
-+  return true;
-+}
-+
-+static void mqttEnsureRuntime(const mesh::LocalIdentity& self_id, const char* origin_name, uint32_t now_epoch) {
-+  if (WiFi.status() != WL_CONNECTED) {
-+    mqttStopClient();
-+    g_mqtt_needs_reconnect = true;
-+    return;
-+  }
-+
-+  if (mqttProfileCount() <= 0) {
-+    mqttStopClient();
-+    g_mqtt_needs_reconnect = false;
-+    return;
-+  }
-+
-+  if (g_mqtt_active_profile < 0) g_mqtt_active_profile = mqttNextProfileIndex(-1);
-+
-+  if (g_mqtt_started && !g_mqtt_stats.connected && g_mqtt_connect_started_at > 0 && (millis() - g_mqtt_connect_started_at) > 15000) {
-+    mqttStopClient();
-+    g_mqtt_needs_reconnect = true;
-+    g_mqtt_active_profile = mqttNextProfileIndex(g_mqtt_active_profile);
-+    mqttSetReconnectDelay(g_mqtt_backoff_ms);
-+  }
-+
-+  if (g_mqtt_needs_reconnect) {
-+    if ((int32_t)(millis() - g_mqtt_next_reconnect_at) < 0) return;
-+    if (!mqttStartClient(self_id, origin_name, now_epoch)) {
-+      g_mqtt_active_profile = mqttNextProfileIndex(g_mqtt_active_profile);
-+      mqttSetReconnectDelay(g_mqtt_backoff_ms);
-+      if (g_mqtt_backoff_ms < 120000) g_mqtt_backoff_ms *= 2;
-+    }
-+  }
-+}
-+#endif
- 
- void MyMesh::putNeighbour(const mesh::Identity &id, uint32_t timestamp, float snr) {
-@@ -479,6 +1102,9 @@
-     logPacketSummary(raw, len, "TCP TX (raw)");
-   }
- #endif
-+#if defined(ESP32) && MQTT_REPORTING_ENABLED
-+  mqttPublishRawFrame(raw, len, getRTCClock()->getCurrentTime());
-+#endif
- }
- 
- void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
-@@ -498,6 +1124,9 @@
-     }
-   }
- #endif
-+#if defined(ESP32) && MQTT_REPORTING_ENABLED
-+  mqttPublishMeshPacket(pkt, len, "RX", score, true, (int)_radio->getLastSNR(), (int)_radio->getLastRSSI(), getRTCClock()->getCurrentTime());
-+#endif
- 
-   if (_logging) {
-     File f = openAppend(PACKET_LOG_FILE);
-@@ -535,6 +1164,9 @@
-     }
-   }
- #endif
-+#if defined(ESP32) && MQTT_REPORTING_ENABLED
-+  mqttPublishMeshPacket(pkt, len, "TX", 0.0f, false, 0, 0, getRTCClock()->getCurrentTime());
-+#endif
- 
-   if (_logging) {
-     File f = openAppend(PACKET_LOG_FILE);
-@@ -723,7 +1355,231 @@
- 
+ static uint16_t fletcher16(const uint8_t* data, size_t len) {
+   uint16_t sum1 = 0;
+   uint16_t sum2 = 0;
+@@ -597,6 +636,189 @@ void MyMesh::initTcpBridge() {
  void MyMesh::handleRawPacketServer() {
--  if (_raw_packet_server == NULL) return;
-+
+   if (_raw_packet_server == NULL) return;
+ 
 +  if (g_http_stats_server == NULL && WiFi.status() == WL_CONNECTED) {
 +    g_http_stats_server = new WiFiServer(HTTP_STATS_PORT);
 +    if (g_http_stats_server) {
@@ -861,45 +72,21 @@
 +    WiFiClient http_client = g_http_stats_server->available();
 +    if (http_client) {
 +      g_http_requests_total++;
-+      http_client.setTimeout(100);
++      http_client.setTimeout(250);
 +
 +      String request_line = http_client.readStringUntil('\n');
 +      request_line.trim();
-+      if (request_line.length() == 0) {
-+        http_client.stop();
-+        return;
-+      }
 +
 +      while (http_client.connected()) {
 +        String header = http_client.readStringUntil('\n');
 +        if (header == "\r" || header.length() == 0) break;
 +      }
 +
-+      bool is_head = request_line.startsWith("HEAD ");
-+      bool is_root = request_line.startsWith("GET / ") || request_line.startsWith("HEAD / ");
-+      bool is_stats = request_line.startsWith("GET /stats ") || request_line.startsWith("HEAD /stats ");
-+      bool is_stats_json = request_line.startsWith("GET /stats.json ") || request_line.startsWith("HEAD /stats.json ");
-+      bool is_health = request_line.startsWith("GET /health ") || request_line.startsWith("HEAD /health ") ||
-+                       request_line.startsWith("GET /healthz ") || request_line.startsWith("HEAD /healthz ");
++      bool is_stats_req = request_line.startsWith("GET / ") ||
++                          request_line.startsWith("GET /stats ") ||
++                          request_line.startsWith("GET /stats.json ");
 +
-+      if (is_stats_json) {
-+        http_client.print("HTTP/1.1 302 Found\r\n");
-+        http_client.print("Location: /stats\r\n");
-+        http_client.print("Connection: close\r\n");
-+        http_client.print("\r\n");
-+        http_client.stop();
-+      } else if (is_health) {
-+        static const char kHealthBody[] = "OK\n";
-+        http_client.print("HTTP/1.1 200 OK\r\n");
-+        http_client.print("Content-Type: text/plain\r\n");
-+        http_client.print("Cache-Control: no-store\r\n");
-+        http_client.print("Connection: close\r\n");
-+        http_client.printf("Content-Length: %d\r\n\r\n", (int)(sizeof(kHealthBody) - 1));
-+        if (!is_head) {
-+          http_client.print(kHealthBody);
-+        }
-+        http_client.stop();
-+      } else if (is_root || is_stats) {
++      if (is_stats_req) {
 +        uint32_t active_clients = 0;
 +        for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
 +          if (_raw_packet_clients[i].connected()) active_clients++;
@@ -907,7 +94,7 @@
 +        if (active_clients > g_tcp_stats.max_simultaneous_clients) {
 +          g_tcp_stats.max_simultaneous_clients = active_clients;
 +        }
- 
++
 +        uint16_t direct_dups = ((SimpleMeshTables *)getTables())->getNumDirectDups();
 +        uint16_t flood_dups = ((SimpleMeshTables *)getTables())->getNumFloodDups();
 +        uint32_t now_epoch = getRTCClock()->getCurrentTime();
@@ -922,22 +109,9 @@
 +        String ssid = WiFi.SSID();
 +        const char* wifi_connected = (WiFi.status() == WL_CONNECTED) ? "true" : "false";
 +        const char* mqtt_enabled = MQTT_REPORTING_ENABLED ? "true" : "false";
-+        const char* mqtt_connected = "false";
-+        uint32_t mqtt_connect_attempts = 0;
-+        uint32_t mqtt_reconnects = 0;
-+        uint32_t mqtt_publish_ok = 0;
-+        uint32_t mqtt_publish_fail = 0;
-+        int32_t mqtt_last_error = 0;
-+#if defined(ESP32) && MQTT_REPORTING_ENABLED
-+        mqtt_connected = g_mqtt_stats.connected ? "true" : "false";
-+        mqtt_connect_attempts = g_mqtt_stats.connect_attempts;
-+        mqtt_reconnects = g_mqtt_stats.reconnects;
-+        mqtt_publish_ok = g_mqtt_stats.publish_ok;
-+        mqtt_publish_fail = g_mqtt_stats.publish_fail;
-+        mqtt_last_error = g_mqtt_stats.last_error_code;
-+#endif
++        const char* mqtt_connected = g_mqtt_stats.connected ? "true" : "false";
 +
-+        char body[2300];
++        char body[2048];
 +        snprintf(
 +            body, sizeof(body),
 +            "{"
@@ -1027,11 +201,11 @@
 +            (unsigned int)flood_dups,
 +            mqtt_enabled,
 +            mqtt_connected,
-+            (unsigned long)mqtt_connect_attempts,
-+            (unsigned long)mqtt_reconnects,
-+            (unsigned long)mqtt_publish_ok,
-+            (unsigned long)mqtt_publish_fail,
-+            (long)mqtt_last_error,
++            (unsigned long)g_mqtt_stats.connect_attempts,
++            (unsigned long)g_mqtt_stats.reconnects,
++            (unsigned long)g_mqtt_stats.publish_ok,
++            (unsigned long)g_mqtt_stats.publish_fail,
++            (long)g_mqtt_stats.last_error_code,
 +            TCP_PORT,
 +            (unsigned long)active_clients,
 +            (unsigned long)g_tcp_stats.clients_accepted,
@@ -1048,61 +222,74 @@
 +            (unsigned long)g_tcp_stats.tx_delivery_failures,
 +            HTTP_STATS_PORT,
 +            (unsigned long)g_http_requests_total,
-+            (unsigned long)g_http_not_found
-+        );
++            (unsigned long)g_http_not_found);
 +
 +        http_client.print("HTTP/1.1 200 OK\r\n");
 +        http_client.print("Content-Type: application/json\r\n");
 +        http_client.print("Cache-Control: no-store\r\n");
-+        http_client.print("Connection: close\r\n");
-+        http_client.printf("Content-Length: %d\r\n\r\n", (int)strlen(body));
-+        if (!is_head) {
-+          http_client.print(body);
-+        }
-+        http_client.stop();
++        http_client.print("Connection: close\r\n\r\n");
++        http_client.print(body);
 +      } else {
 +        g_http_not_found++;
 +        http_client.print("HTTP/1.1 404 Not Found\r\n");
 +        http_client.print("Content-Type: text/plain\r\n");
 +        http_client.print("Connection: close\r\n\r\n");
 +        http_client.print("Not Found\n");
-+        http_client.stop();
 +      }
++
++      delay(1);
++      http_client.stop();
 +    }
 +  }
-+
-+  if (_raw_packet_server == NULL) return;
 +
    WiFiClient incoming = _raw_packet_server->available();
    if (incoming) {
      int free_idx = -1;
-@@ -737,8 +1575,13 @@
+@@ -610,8 +832,10 @@ void MyMesh::handleRawPacketServer() {
      if (free_idx >= 0) {
        _raw_packet_clients[free_idx] = incoming;
        _raw_rx_pos[free_idx] = 0;
-+      g_tcp_client_connected[free_idx] = true;
 +      g_tcp_stats.clients_accepted++;
-+      httpUiLogf("TCP client connected idx=%d", free_idx);
        Serial.printf("[TCP] Client connected (%d)\n", free_idx);
      } else {
 +      g_tcp_stats.clients_rejected++;
-+      httpUiLogf("TCP client rejected: no free slot");
        incoming.stop();
      }
    }
-@@ -746,6 +1587,11 @@
+@@ -619,9 +843,14 @@ void MyMesh::handleRawPacketServer() {
    for (int idx = 0; idx < MAX_TCP_CLIENTS; idx++) {
      auto &client = _raw_packet_clients[idx];
      if (!client.connected()) {
 +      if (g_tcp_client_connected[idx]) {
 +        g_tcp_client_connected[idx] = false;
 +        g_tcp_stats.clients_disconnected++;
-+        httpUiLogf("TCP client disconnected idx=%d", idx);
 +      }
        if (_raw_rx_pos[idx]) _raw_rx_pos[idx] = 0;
        continue;
      }
-@@ -792,34 +1637,54 @@
++    g_tcp_client_connected[idx] = true;
+ 
+     while (client.available()) {
+       int c = client.read();
+@@ -656,43 +885,72 @@ void MyMesh::handleRawPacketServer() {
+         bool ok = parseRS232BridgePacket(_raw_rx_buffer[idx], _raw_rx_pos[idx], idx);
+         _raw_rx_pos[idx] = 0;
+         if (!ok) {
++          g_tcp_stats.rx_parse_errors++;
+           // drop and reset
+           continue;
+         }
+       }
+     }
+   }
++
++  uint32_t active_clients = 0;
++  for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
++    if (_raw_packet_clients[i].connected()) active_clients++;
++  }
++  if (active_clients > g_tcp_stats.max_simultaneous_clients) {
++    g_tcp_stats.max_simultaneous_clients = active_clients;
++  }
  }
  
  bool MyMesh::parseRS232BridgePacket(const uint8_t* buffer, int len, int client_idx) {
@@ -1162,7 +349,7 @@
    displayReceivedPacket(buffer + 4, payload_len);
    sendFlood(pkt);
    return true;
-@@ -833,6 +1698,8 @@
+@@ -706,6 +964,8 @@ void MyMesh::sendPacketToTcpClients(const uint8_t* payload, int len) {
  void MyMesh::sendRS232BridgeFrameToTcp(const uint8_t* payload, int len) {
    if (!_raw_packet_server) return;
    uint16_t checksum = fletcher16(payload, len);
@@ -1171,7 +358,7 @@
  
    uint8_t header[4] = {0xC0, 0x3E, (uint8_t)(len >> 8), (uint8_t)(len & 0xFF)};
  
-@@ -842,11 +1709,14 @@
+@@ -715,11 +975,19 @@ void MyMesh::sendRS232BridgeFrameToTcp(const uint8_t* payload, int len) {
        if (client) client.stop();
        continue;
      }
@@ -1180,29 +367,19 @@
 -    client.write((uint8_t)((checksum >> 8) & 0xFF));
 -    client.write((uint8_t)(checksum & 0xFF));
 -    client.write('\n');
-+    size_t written = 0;
-+    written += client.write(header, 4);
-+    written += client.write(payload, len);
-+    written += client.write((uint8_t)((checksum >> 8) & 0xFF));
-+    written += client.write((uint8_t)(checksum & 0xFF));
-+    written += client.write('\n');
-+    if (written == (size_t)(len + 7)) g_tcp_stats.tx_deliveries++;
-+    else g_tcp_stats.tx_delivery_failures++;
++    size_t sent = 0;
++    sent += client.write(header, 4);
++    sent += client.write(payload, len);
++    sent += client.write((uint8_t)((checksum >> 8) & 0xFF));
++    sent += client.write((uint8_t)(checksum & 0xFF));
++    sent += client.write('\n');
++
++    size_t wanted = (size_t)(len + 7);
++    if (sent == wanted) {
++      g_tcp_stats.tx_deliveries++;
++    } else {
++      g_tcp_stats.tx_delivery_failures++;
++    }
    }
  }
  
-@@ -1676,6 +2546,14 @@
-     handleConsoleMirrorServer();
-   }
- #endif
-+#if defined(ESP32) && MQTT_REPORTING_ENABLED
-+  uint32_t now_epoch = getRTCClock()->getCurrentTime();
-+  mqttEnsureRuntime(self_id, _prefs.node_name, now_epoch);
-+  if (g_mqtt_stats.connected && !g_mqtt_prev_connected) {
-+    mqttPublishStatus("online", now_epoch, true);
-+  }
-+  g_mqtt_prev_connected = g_mqtt_stats.connected;
-+#endif
- 
-   if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {
-     mesh::Packet *pkt = createSelfAdvert();
