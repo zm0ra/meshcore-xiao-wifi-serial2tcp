@@ -65,6 +65,8 @@ Co zmienic:
 Jak wykonac:
 - wydzielic minimalny shell strony: top bar, glowny kontener, status polaczenia,
   nawigacja i pusty obszar ekranu
+- podstawowy shell ma dawac przynajmniej tryb read-only: status urzadzenia i
+  prosta liste ostatnich wiadomosci nawet wtedy, gdy JS nie zaladuje sie wcale
 - JS podzielic logicznie na male moduly lub sekcje ladowane warunkowo
 - mapa, diagnostyka, remote tools i ciezkie panele maja byc inicjalizowane dopiero
   po wejsciu na dany ekran
@@ -92,6 +94,8 @@ Jak wykonac:
 - uzyc ETag albo Last-Modified
 - jesli firmware generuje string statyczny, mozna trzymac prekompresowana wersje
   gzip i odsylac ja bez generowania w locie
+- jesli toolchain i serwer HTTP na to pozwalaja, rozwazyc tez prekompresje Brotli
+  dla tekstowych assetow, z gzip jako bezpiecznym fallbackiem
 - dynamiczne dane zostawic w JSON API z no-store
 
 Co nalezy osiagnac:
@@ -102,15 +106,21 @@ Co nalezy osiagnac:
 Uwagi:
 - na ESP32 bardziej oplaca sie wyslac prekompresowany statyczny shell niz generowac
   duze HTML i CSS za kazdym razem
+- jesli shell jest naprawde statyczny, najlepiej produkowac assety .gz/.br juz na
+  etapie builda, a nie kompresowac je dynamicznie na urzadzeniu
 
-ZMIANA 3 - OGRANICZENIE POLLINGU I ZMIANA MODELU ODSWIEZANIA
-------------------------------------------------------------
+ZMIANA 3 - OGRANICZENIE POLLINGU, OPCJONALNIE WEBSOCKET, I ZMIANA MODELU ODSWIEZANIA
+------------------------------------------------------------------------------------
 
 Co zmienic:
 - polling co 3 s i 20 s jest zbyt agresywny jako zachowanie bazowe
 
 Jak wykonac:
-- wprowadzic adaptive polling
+- wariant preferowany: WebSocket do statusu, delt wiadomosci i unread counts
+- utrzymywac tylko lekki heartbeat lub ping/pong, zeby wykrywac utrate sesji
+- po zerwaniu WebSocketu przechodzic automatycznie na adaptive polling i probowac
+  wznowic polaczenie w tle
+- jesli WebSocket nie jest wdrazany, wprowadzic adaptive polling jako pelny model
 - aktywny ekran czatu: 3-5 s tylko dla delty wiadomosci i lekkiego statusu
 - lista kanalow lub kontaktow: 10-20 s albo tylko po zmianie licznika/unread
 - ekran ustawien: brak stalego pollingu, tylko reczne odswiezenie albo lekkie heartbeat
@@ -123,9 +133,15 @@ Co nalezy osiagnac:
 - mniejsze skoki statusu i mniej falszywych errorow
 
 Docelowy wzorzec:
-- status lacznosci jako osobny lekki endpoint
-- wiadomosci i delivery tylko jako delty
+- status lacznosci jako osobny lekki endpoint albo push po WebSocket
+- wiadomosci i delivery tylko jako delty, najlepiej pushowane po WebSocket
 - kanaly i kontakty nie powinny byc pobierane stale bez potrzeby
+
+Uwagi:
+- jesli firmware zostaje maksymalnie proste, sam adaptive polling nadal jest
+  wariantem w pelni akceptowalnym
+- przy AsyncWebSocket koszt po stronie firmware jest zwykle niski, a zysk po
+  stronie Wi-Fi i liczby requestow HTTP bardzo wyrazny
 
 ZMIANA 4 - UPROSZCZENIE I STABILIZACJA API POD UI
 -------------------------------------------------
@@ -286,6 +302,8 @@ ZMIANA 10 - MAPA MUSI MIEC TRYB OFFLINE / LITE
 
 Co zmienic:
 - zewnetrzny CDN dla Leaflet i kafli mapy jest ryzykowny dla urzadzenia terenowego
+- tryb lite powinien byc traktowany jako wariant domyslny, a pelna mapa jako
+  modul opcjonalny
 
 Jak wykonac:
 - mapa nie moze byc wymagana do podstawowej obslugi UI
@@ -294,13 +312,17 @@ Jak wykonac:
   - odleglosc
   - kierunek
   - znacznik tekstowy bez kafli
+- pelna mape ladowac dopiero po jawnej akcji typu "Pokaz mape z kafelkami"
 - jesli zostaje pelna mapa, assety biblioteki maja byc hostowane lokalnie
+- koszt assetow pelnej mapy traktowac jako osobny budzet, rzedu dodatkowych
+  200-300 KB, a nie jako element podstawowego UI
 - ladowac mape tylko po wejciu na ekran mapy i tylko raz
 
 Co nalezy osiagnac:
 - brak zalezności od internetu publicznego
 - brak awarii calego UI, gdy mapa nie moze sie zaladowac
 - mozliwosc obslugi nawet na slabej sieci lokalnej
+- podstawowy scenariusz uzycia ma nie wymagac Leaflet w ogole
 
 Nie robic:
 - nie pobierac mapy i CSS mapy przy starcie aplikacji
@@ -320,6 +342,8 @@ Jak wykonac:
   - zapis w toku
   - zapis zakonczony
   - blad zapisu
+- dodac globalny wskaznik "zapis w toku" w top barze albo jako mala stala lampke,
+  tak aby uzytkownik widzial, ze UI nadal pracuje
 - komunikaty maja byc krotkie i operacyjne
 - kazdy blad ma zawierac kolejny krok, np. retry, odswiez, sprawdz Wi-Fi
 
@@ -391,6 +415,8 @@ Jak wykonac:
   - drobne metadane
 - wieksze odstepy pionowe, mniej ramek, mniej dekoracyjnych separatorow
 - kolory stonowane, lekko techniczne, bez agresywnych akcentow
+- jesli ma byc dark mode, zrobic go tylko jako jeden przelacznik oparty na CSS
+  variables, bez utrzymywania dwoch osobnych systemow styli
 
 Co nalezy osiagnac:
 - spokojny, dojrzaly interfejs
@@ -448,14 +474,12 @@ Co zmienic:
 
 Jak wykonac:
 - zostac przy vanilla JS
-- wprowadzic male, jasno nazwane moduly funkcjonalne:
-  - transport/api
-  - state
-  - render-status
-  - render-lists
-  - render-chat
-  - render-settings
-  - render-map
+- praktyczny podzial to jeden glowny app.js i 4-5 logicznych modulow, np. api.js,
+  status.js, chat.js, settings.js, map.js
+- moduly moga byc ladowane przez script type="module" albo konkatenowane i
+  minifikowane w buildzie do jednego assetu startowego
+- unikac 15 mikro-modulow; na embedded lepiej miec kilka wiekszych, logicznych
+  sekcji niz bardzo drobna granularnosc
 - preferowac aktualizacje punktowe textContent/className/value zamiast masowego
   innerHTML tam, gdzie to mozliwe
 - nie tworzyc niepotrzebnie wielu listenerow na kazdym rerenderze
@@ -587,6 +611,8 @@ Interfejs mozna uznac za gotowy dopiero, gdy:
 - nie zalezy od zewnetrznych CDN do podstawowej obslugi
 - nie pobiera niepotrzebnie duzej ilosci danych
 - nie wymaga frameworka frontendowego
+- podstawowy shell pozostaje uzyteczny nawet przy bledzie ladowania JS,
+  przynajmniej w trybie read-only
 - ma spokojny, czysty, premium wyglad bez przesady
 - wszystkie operacje krytyczne maja jasny feedback i sensowne zabezpieczenia
 
