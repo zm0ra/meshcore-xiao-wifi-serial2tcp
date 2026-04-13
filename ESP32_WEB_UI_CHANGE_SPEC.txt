@@ -1,0 +1,614 @@
+ESP32 WEB UI CHANGE SPEC
+========================
+
+Dokument opisuje komplet zmian potrzebnych do przebudowy webowego interfejsu
+MeshCore tak, aby byl ladny, czytelny, stabilny i realnie uzywalny, gdy jest
+serwowany bezposrednio z ESP32.
+
+Zakres dokumentu:
+- web client dostepny pod adresem http://172.30.105.16
+- ocena z punktu widzenia UI/UX, frontend, wydajnosci, RAM/flash, CPU i Wi-Fi
+- nacisk na wykonalnosc na ESP32, nie na efekt demonstracyjny
+
+STAN OBECNY - TWARDY PUNKT ODNIESIENIA
+-------------------------------------
+
+Pomiary z audytu:
+- HTML strony glownej: ok. 190931 B
+- CSS inline: ok. 21435 B
+- JS inline: ok. 133566 B
+- Cache-Control: no-store
+- brak kompresji odpowiedzi HTTP
+- start UI wykonuje kilka zapytan API rownolegle
+- polling co 3 s dla statusu i wiadomosci
+- dodatkowy polling co 20 s dla kanalow, kontaktow i prefs
+- mapa laduje Leaflet z zewnetrznego CDN
+
+Wnioski:
+- interfejs jest funkcjonalny, ale zbyt ciezki jak na ESP32 jako webserwer
+- za duzo logiki jest ladowane od razu, nawet gdy uzytkownik jej nie potrzebuje
+- obecny model odswiezania zbyt latwo obciaza Wi-Fi, CPU i JSON parsing
+- styl wizualny jest poprawny, ale premium nie wynika z dyscypliny projektu,
+  tylko z duzej ilosci elementow i duzej gestosci interfejsu
+
+GLOWNY CEL PROJEKTOWY
+---------------------
+
+Docelowy interfejs ma spelnic jednoczesnie wszystkie ponizsze warunki:
+- ma wygladac schludnie, dojrzale i premium bez przesady
+- ma byc blyskawicznie odczuwalny na telefonie i komputerze
+- ma byc stabilny przy slabszym Wi-Fi i chwilowych opoznieniach
+- ma byc prosty po stronie firmware i prosty do utrzymania
+- ma miec minimalny narzut JS i maly koszt renderowania DOM
+- ma nie wymagac frameworka SPA ani zewnetrznych zaleznosci do dzialania
+- ma nie frustrowac uzytkownika brakiem feedbacku, skokami layoutu lub chaosem
+
+ZASADY NADRZEDNE DLA ESP32
+-------------------------
+
+1. Nie budowac "malych desktopowych aplikacji" na ESP32.
+2. Najpierw przewidywalnosc, potem efekt wizualny.
+3. Najpierw czytelnosc informacji, potem liczba funkcji na ekranie.
+4. Najpierw male i tanie odpowiedzi HTTP, potem wygoda implementacji w JS.
+5. Najpierw prosty DOM i delty danych, potem wygodne pelne rerendery.
+6. Najpierw lokalne assety i brak zaleznosci zewnętrznych, potem bajery.
+7. Premium ma wynikac z proporcji, siatki, typografii i porzadku, nie z animacji.
+
+ZMIANA 1 - ODCHUDZENIE SHELLA STARTOWEGO
+----------------------------------------
+
+Co zmienic:
+- zredukowac caly startowy shell HTML + CSS + JS
+- nie ladowac wszystkiego w jednym wielkim dokumencie
+- ograniczyc ilosc kodu potrzebnego do pierwszego widoku
+
+Jak wykonac:
+- wydzielic minimalny shell strony: top bar, glowny kontener, status polaczenia,
+  nawigacja i pusty obszar ekranu
+- JS podzielic logicznie na male moduly lub sekcje ladowane warunkowo
+- mapa, diagnostyka, remote tools i ciezkie panele maja byc inicjalizowane dopiero
+  po wejsciu na dany ekran
+- jesli kod zostaje w jednym pliku, to i tak trzeba zrobic lazy init per ekran,
+  a nie bootstrap wszystkiego od razu
+
+Co nalezy osiagnac:
+- pierwszy ekran gotowy do uzycia bez czekania na kod mapy i ciezkich widokow
+- mniejszy koszt parsowania HTML i JS
+- szybsza reakcja po wejscu na urzadzenie
+
+Cel techniczny:
+- shell HTML po kompresji: najlepiej <= 45 KB
+- CSS krytyczny: najlepiej <= 12 KB po minifikacji
+- JS startowy: najlepiej <= 45-60 KB po minifikacji
+
+ZMIANA 2 - KOMPRESJA I CACHE ZAMIAST NO-STORE WSZEDZIE
+------------------------------------------------------
+
+Co zmienic:
+- nie serwowac calego UI stale z no-store, jesli dokument jest statycznym shellem
+
+Jak wykonac:
+- dla glownego HTML shella ustawic cache walidowany, nie twardy brak cache
+- uzyc ETag albo Last-Modified
+- jesli firmware generuje string statyczny, mozna trzymac prekompresowana wersje
+  gzip i odsylac ja bez generowania w locie
+- dynamiczne dane zostawic w JSON API z no-store
+
+Co nalezy osiagnac:
+- odswiezanie strony ma nie sciagac za kazdym razem 190 KB nieskompresowanego HTML
+- powrot do UI po chwilowej utracie lacznosci ma byc szybszy
+- mniejszy transfer i mniejsze zuzycie CPU po stronie klienta i urzadzenia
+
+Uwagi:
+- na ESP32 bardziej oplaca sie wyslac prekompresowany statyczny shell niz generowac
+  duze HTML i CSS za kazdym razem
+
+ZMIANA 3 - OGRANICZENIE POLLINGU I ZMIANA MODELU ODSWIEZANIA
+------------------------------------------------------------
+
+Co zmienic:
+- polling co 3 s i 20 s jest zbyt agresywny jako zachowanie bazowe
+
+Jak wykonac:
+- wprowadzic adaptive polling
+- aktywny ekran czatu: 3-5 s tylko dla delty wiadomosci i lekkiego statusu
+- lista kanalow lub kontaktow: 10-20 s albo tylko po zmianie licznika/unread
+- ekran ustawien: brak stalego pollingu, tylko reczne odswiezenie albo lekkie heartbeat
+- po bledzie sieci: exponential backoff, np. 3 s, 6 s, 12 s, 24 s, max 60 s
+- kiedy karta przegladarki jest ukryta, polling mocno spowolnic
+
+Co nalezy osiagnac:
+- mniej zapytan HTTP
+- mniejsze ryzyko zawieszania interfejsu przy slabym Wi-Fi
+- mniejsze skoki statusu i mniej falszywych errorow
+
+Docelowy wzorzec:
+- status lacznosci jako osobny lekki endpoint
+- wiadomosci i delivery tylko jako delty
+- kanaly i kontakty nie powinny byc pobierane stale bez potrzeby
+
+ZMIANA 4 - UPROSZCZENIE I STABILIZACJA API POD UI
+-------------------------------------------------
+
+Co zmienic:
+- frontend nie powinien skladac ekranu z wielu rownoleglych zapytan startowych,
+  jesli firmware moze dostarczyc lekki stan zbiorczy
+
+Jak wykonac:
+- przygotowac lekki endpoint startowy, ktory zwroci tylko to, co potrzebne do
+  pierwszego widoku: nazwa node, stan polaczenia, podstawowe counters, ostatnie
+  info o czasie, uproszczone unread counts
+- przygotowac osobne endpointy do ekranow specjalnych: mapa, zaawansowane config,
+  diagnostyka, remote admin
+- jesli dana sekcja nie jest widoczna, nie pobierac jej danych
+
+Co nalezy osiagnac:
+- szybszy i bardziej przewidywalny bootstrap
+- latwiejsza kontrola nad tym, co obciaza urzadzenie
+
+Cel praktyczny:
+- maksymalnie 1 lekki request startowy
+- maksymalnie 1 lekki request delta na cykl odswiezania aktywnego widoku
+
+ZMIANA 5 - NOWA ARCHITEKTURA INFORMACJI
+--------------------------------------
+
+Co zmienic:
+- obecny interfejs jest zbyt gesty i miesza rzeczy czeste z rzeczami eksperckimi
+
+Jak wykonac:
+- zostawic tylko 4 glowne obszary:
+  1. Status
+  2. Wiadomosci
+  3. Konfiguracja
+  4. Narzedzia zaawansowane
+- nie wrzucac wszystkiego na startowy ekran
+- na telefonie i desktopie zachowac te sama logike, ale z inna gestoscia layoutu
+
+Co nalezy osiagnac:
+- uzytkownik ma zawsze wiedziec, gdzie jest i co moze bezpiecznie zrobic
+- czeste zadania maja byc pierwszoplanowe
+- ryzykowne operacje maja byc odsuniete od codziennej obslugi
+
+Najlepszy wzorzec:
+- ekran glowny jako dashboard stanu
+- ekran czatu jako osobna przestrzen zadaniowa
+- ustawienia podstawowe osobno od zaawansowanych
+
+ZMIANA 6 - EKRAN STATUSU MUSI BYC PIERWSZYM I NAJLEKKIEJSZYM EKRANEM
+--------------------------------------------------------------------
+
+Co zmienic:
+- status urzadzenia ma byc najszybszy, najczytelniejszy i najmniej kosztowny
+
+Jak wykonac:
+- pierwszy ekran ma pokazywac tylko najwazniejsze karty:
+  - Wi-Fi: online/offline, RSSI, IP
+  - radio: podstawowy stan, bateria, ostatni czas odpowiedzi
+  - ruch: liczba klientow TCP / aktywne sesje / kolejka
+  - mesh: unread, ostatni packet, liczba znanych kontaktow lub kanalow
+- uzyc prostych kart tekstowych bez wykresow i canvas
+- nie aktualizowac calego dashboardu, jesli zmienia sie tylko jedna liczba
+
+Co nalezy osiagnac:
+- jeden rzut oka ma wystarczyc do oceny, czy urzadzenie zyje i dziala
+- ekran ma byc czytelny z telefonu trzymanego jedna reka
+- layout ma nie skakac przy odswiezaniu danych
+
+Wskazowka wizualna:
+- duza typografia dla statusu glownego
+- male, stonowane metadane pod spodem
+- max 4 glowne karty w pierwszym widoku
+
+ZMIANA 7 - LISTY KANALOW I KONTAKTOW MAJA BYC LEKKIE I PRZEWIDYWALNE
+--------------------------------------------------------------------
+
+Co zmienic:
+- listy nie powinny byc ciezkimi strukturami z wieloma warstwami, badge i efektami
+
+Jak wykonac:
+- kazdy wiersz listy ma miec:
+  - nazwe
+  - jedna linie podgladu
+  - timestamp lub status
+  - opcjonalny badge unread
+- nie budowac zbyt wielu warstw wrapperow w DOM
+- row hover tylko na desktopie i bardzo subtelny
+- na mobile nacisk na duzy obszar dotykowy i prosty hit area
+
+Co nalezy osiagnac:
+- szybko renderowane listy
+- brak chaosu wizualnego
+- latwe skanowanie wzrokiem
+
+Nie robic:
+- nie dodawac wielu ikon i chipow w jednym wierszu
+- nie upychac szczegolow trasy, delivery i typu pakietu w glownej liscie
+
+ZMIANA 8 - EKRAN CZATU MA BYC MAKSYMALNIE PROSTY
+------------------------------------------------
+
+Co zmienic:
+- ekran wiadomosci powinien byc czytelny i odporny na opoznienia sieciowe
+
+Jak wykonac:
+- proste babele, dwa stale kolory, bez gradientow i cieni dekoracyjnych
+- status wysylki jako krotki tekst albo maly znacznik, nie jako rozbudowany badge
+- pole wpisywania stale przyklejone, ale bez ciezkich efektow
+- licznik znakow pokazac dopiero blisko limitu albo dyskretnie pod polem
+- po wyslaniu pokazac stan: wysylanie, wyslano, blad, ponow
+
+Co nalezy osiagnac:
+- czat ma pozostac szybki przy duzej liczbie wiadomosci
+- uzytkownik ma rozumiec, czy wiadomosc nie doszla z powodu mesh, czy z powodu UI
+
+Wazne:
+- w DOM nie rerenderowac calej historii po kazdej delcie
+- dopisywac tylko nowe wiadomosci i aktualizowac statusy punktowo
+
+ZMIANA 9 - USTAWIENIA PODSTAWOWE I ZAAWANSOWANE MUSZA BYC ODDZIELONE
+--------------------------------------------------------------------
+
+Co zmienic:
+- obecny ekran ustawien ma zbyt duzo pol pierwszego kontaktu i zbyt wysoka gestosc
+
+Jak wykonac:
+- sekcja "Podstawowe":
+  - nazwa node
+  - Wi-Fi tylko jesli dotyczy
+  - region/preset radia
+  - podstawowe GPS
+  - save / sync time
+- sekcja "Radio zaawansowane":
+  - freq, bw, sf, cr, tx power
+  - airtime factor
+  - rx delay base
+  - multi acks
+  - path hash mode
+- sekcja "Serwis":
+  - export
+  - import
+  - diagnostyka
+  - reboot
+  - clear data
+- zaawansowane sekcje jako collapsible, domyslnie zamkniete
+
+Co nalezy osiagnac:
+- zwykly uzytkownik ma nie czuc sie przytloczony
+- operator techniczny ma nadal miec dostep do szczegolow
+
+Zasada:
+- preset first, manual later
+- najpierw wybor regionu/profilu, dopiero potem reczna korekta parametrow
+
+ZMIANA 10 - MAPA MUSI MIEC TRYB OFFLINE / LITE
+----------------------------------------------
+
+Co zmienic:
+- zewnetrzny CDN dla Leaflet i kafli mapy jest ryzykowny dla urzadzenia terenowego
+
+Jak wykonac:
+- mapa nie moze byc wymagana do podstawowej obslugi UI
+- dodac tryb "lite":
+  - lista wspolrzednych
+  - odleglosc
+  - kierunek
+  - znacznik tekstowy bez kafli
+- jesli zostaje pelna mapa, assety biblioteki maja byc hostowane lokalnie
+- ladowac mape tylko po wejciu na ekran mapy i tylko raz
+
+Co nalezy osiagnac:
+- brak zalezności od internetu publicznego
+- brak awarii calego UI, gdy mapa nie moze sie zaladowac
+- mozliwosc obslugi nawet na slabej sieci lokalnej
+
+Nie robic:
+- nie pobierac mapy i CSS mapy przy starcie aplikacji
+- nie trzymac stale aktywnej aktualizacji mapy w tle
+
+ZMIANA 11 - FEEDBACK I STANY LACZNOSCI MUSZA BYC JEDNOZNACZNE
+-------------------------------------------------------------
+
+Co zmienic:
+- komunikaty w stylu "Connection issue" sa zbyt ogolne
+
+Jak wykonac:
+- wprowadzic jeden wspolny komponent stanu:
+  - online
+  - opoznione odpowiedzi
+  - offline
+  - zapis w toku
+  - zapis zakonczony
+  - blad zapisu
+- komunikaty maja byc krotkie i operacyjne
+- kazdy blad ma zawierac kolejny krok, np. retry, odswiez, sprawdz Wi-Fi
+
+Co nalezy osiagnac:
+- uzytkownik ma od razu wiedziec, czy problem jest chwilowy czy krytyczny
+- mniej frustracji i mniej prob "klikam kilka razy bo nie wiem czy zadzialalo"
+
+Przyklady dobrych komunikatow:
+- "Brak odpowiedzi urzadzenia. Ponawiam za 12 s."
+- "Zmiany zapisane."
+- "Wysylka nieudana. Sprawdz stan mesh lub sprobuj ponownie."
+
+ZMIANA 12 - KAZDA AKCJA RYZYKOWNA MUSI MIEC OCHRONY UX
+-----------------------------------------------------
+
+Co zmienic:
+- reboot, clear data, delete, reset i podobne akcje nie moga byc zbyt blisko akcji
+  codziennych
+
+Jak wykonac:
+- osobny blok "Operacje ryzykowne"
+- przycisk kolorystycznie odrozniony, ale nie krzykliwy
+- potwierdzenie tekstowe tylko dla faktycznie ryzykownych operacji
+- pokazac, co sie stanie po akcji i ile to zajmie
+
+Co nalezy osiagnac:
+- brak przypadkowych restartow i utraty danych
+- wiekszy spokoj uzytkownika
+
+Zasada:
+- nie przesadzac z modalami
+- potwierdzac tylko to, czego nie da sie latwo odwrocic
+
+ZMIANA 13 - LEPSZA SEMANTYKA FORMULARZY I DOSTEPNOSC
+----------------------------------------------------
+
+Co zmienic:
+- pola formularzy musza miec prawdziwe label, a nie tylko tekst w div obok inputa
+
+Jak wykonac:
+- kazde pole: label for + input id
+- grupy pol logicznych laczyc w fieldset/legend albo sekcje z jednoznacznym naglowkiem
+- focus state ma byc zawsze widoczny
+- minimalny rozmiar celow dotykowych 44x44 px
+- aria-live dla stanu zapisu i bledow polaczenia
+
+Co nalezy osiagnac:
+- lepsza obsluga klawiatura
+- lepsza obsluga na telefonie
+- czytelniejsze zachowanie dla uzytkownikow mniej technicznych
+
+Nie robic:
+- nie polegac tylko na placeholderach jako etykietach
+- nie ukrywac znaczenia pola w ikonie bez tekstu
+
+ZMIANA 14 - TYPOGRAFIA I PREMIUM LOOK BEZ CIEZKICH ASSETOW
+----------------------------------------------------------
+
+Co zmienic:
+- wyglad premium ma wynikac z porzadku, nie z ilosci efektow
+
+Jak wykonac:
+- uzyc jednej lokalnej, lekkiej hierarchii typograficznej bez webfontow z internetu
+- bezpieczny stack:
+  "SF Pro Text", "Segoe UI", "Noto Sans", sans-serif
+- zbudowac spojnosc na 3 rozmiarach:
+  - duzy status / hero
+  - standardowy tekst UI
+  - drobne metadane
+- wieksze odstepy pionowe, mniej ramek, mniej dekoracyjnych separatorow
+- kolory stonowane, lekko techniczne, bez agresywnych akcentow
+
+Co nalezy osiagnac:
+- spokojny, dojrzaly interfejs
+- brak wrazenia taniego panelu administracyjnego
+- brak przeciazenia bodzcami
+
+Rekomendowana estetyka:
+- jasne tlo o lekko cieplym lub neutralnym tonie
+- ciemny granat/grafit dla naglowkow
+- jeden niebieski akcent sterujacy
+- jeden kolor ostrzezen i jeden kolor bledow
+
+ZMIANA 15 - OGRANICZENIE ANIMACJI DO ABSOLUTNEGO MINIMUM
+--------------------------------------------------------
+
+Co zmienic:
+- animacje powinny byc prawie niewidoczne albo ich nie powinno byc wcale
+
+Jak wykonac:
+- dopuszczalne tylko:
+  - delikatne fade dla snackbar/statusu
+  - subtelna zmiana tla przy aktywnym elemencie
+  - ewentualnie szybka animacja rozwijania sekcji advanced
+- czas trwania 80-140 ms
+- brak blur, brak cieni animowanych, brak parallax, brak skeleton loaderow
+
+Co nalezy osiagnac:
+- UI ma wydawac sie lekkie i stabilne
+- brak dodatkowego kosztu renderowania
+
+Zasada:
+- jesli animacja nie poprawia zrozumienia stanu, nalezy ja usunac
+
+ZMIANA 16 - IKONY I GRAFIKA MAJA BYC TANIE
+------------------------------------------
+
+Co zmienic:
+- ograniczyc emoji i niejednolite symbole platformowe
+
+Jak wykonac:
+- podstawowe ikony jako male inline SVG
+- jeden spojnny styl ikon: cienka linia albo proste wypelnienie, nie mieszac obu
+- nie dodawac bitmap, ilustracji i wiekszych assetow dekoracyjnych
+
+Co nalezy osiagnac:
+- przewidywalny wyglad na macOS, Androidzie i Windows
+- mniejszy rozmiar payloadu
+
+ZMIANA 17 - JS MA BYC VANILLA, ALE ZDYSCYPLINOWANY
+--------------------------------------------------
+
+Co zmienic:
+- nie dokladac frameworka frontendowego
+- nie trzymac ogromnego, rozlanego stanu i wielu pelnych rerenderow
+
+Jak wykonac:
+- zostac przy vanilla JS
+- wprowadzic male, jasno nazwane moduly funkcjonalne:
+  - transport/api
+  - state
+  - render-status
+  - render-lists
+  - render-chat
+  - render-settings
+  - render-map
+- preferowac aktualizacje punktowe textContent/className/value zamiast masowego
+  innerHTML tam, gdzie to mozliwe
+- nie tworzyc niepotrzebnie wielu listenerow na kazdym rerenderze
+
+Co nalezy osiagnac:
+- prostsze debugowanie
+- nizszy koszt CPU i DOM
+- mniejsze ryzyko wyciekow stanu
+
+Zasada:
+- firmware ma byc proste, ale UI tez ma byc proste; brak frameworka nie znaczy chaos
+
+ZMIANA 18 - ZARZADZANIE DANYMI W LISTACH I HISTORII
+--------------------------------------------------
+
+Co zmienic:
+- nie trzymac i nie renderowac zbyt duzych historii na raz
+
+Jak wykonac:
+- limit historii w UI na ekranie, np. ostatnie 100-200 elementow
+- starsze dane doladowywac recznie: "zaladuj starsze"
+- na listach tylko to, co potrzebne do decyzji, nie pelne metadane
+
+Co nalezy osiagnac:
+- brak coraz wolniejszego interfejsu po dluzszej sesji
+- nizszy koszt pamieci w przegladarce klienta i w odpowiedziach z ESP32
+
+ZMIANA 19 - LOKALNE PREFERENCJE UI MAJA BYC MALE I NIEKRYTYCZNE
+---------------------------------------------------------------
+
+Co zmienic:
+- localStorage moze zostac, ale tylko dla rzeczy kosmetycznych i niekrytycznych
+
+Jak wykonac:
+- trzymac tam jedynie:
+  - aktywna zakladke
+  - filtr listy
+  - tryb sortowania
+  - drobne preferencje widoku
+- nie trzymac tam stanu, od ktorego zalezy poprawne dzialanie aplikacji
+
+Co nalezy osiagnac:
+- UI dziala poprawnie po czyszczeniu storage i po otwarciu na innym urzadzeniu
+
+ZMIANA 20 - DOKLADNE BUDZETY WYDAJNOSCIOWE
+-----------------------------------------
+
+Co zmienic:
+- projekt ma miec twarde limity, a nie tylko ogolne "ma byc lzej"
+
+Jak wykonac:
+- przyjac nastepujace budzety docelowe:
+  - shell HTML po kompresji <= 45 KB
+  - CSS <= 12 KB minified
+  - JS startowy <= 60 KB minified
+  - liczba requestow przy starcie: 1-2
+  - czas do interakcji w sieci lokalnej: odczuwalnie < 1 s
+  - aktywny polling: nie czesciej niz potrzebuje aktywny widok
+  - brak stalego pobierania mapy, kontaktow i ustawien bez potrzeby
+
+Co nalezy osiagnac:
+- kazda kolejna zmiana UI moze byc oceniona obiektywnie
+- latwiej zatrzymac rozrost aplikacji
+
+ZMIANA 21 - TESTY UZYWALNOSCI I ODPORNOSCI
+------------------------------------------
+
+Co zmienic:
+- interfejs trzeba oceniac nie tylko na localhost i nie tylko na szybkim laptopie
+
+Jak wykonac:
+- test 1: telefon przez lokalne Wi-Fi, slaby zasieg
+- test 2: desktop, kilka odswiezen z rzedu
+- test 3: zerwanie polaczenia podczas zapisu ustawien
+- test 4: wejscie na mape bez internetu publicznego
+- test 5: dluzsza sesja, np. 30-60 min z pollingiem
+- test 6: otwarcie UI po restarcie ESP32
+
+Co nalezy osiagnac:
+- brak zawieszania UI
+- brak mylacych stanów po bledach
+- brak niekontrolowanego wzrostu czasu odpowiedzi
+
+ZMIANA 22 - CZEGO NIE ROBIC
+---------------------------
+
+Tego nie nalezy wdrazac:
+- framework SPA typu React/Vue tylko po to, zeby bylo "nowoczesnie"
+- wykresy na zywo, canvas telemetry dashboard i stale animowane grafiki
+- zewnetrzne fonty ladowane z internetu
+- zewnetrzne CDN jako warunek poprawnego dzialania UI
+- paralelne odswiezanie wielu endpointow co kilka sekund, jesli widok ich nie potrzebuje
+- agresywne modale, popovery i zbyt wiele menu kontekstowych
+- przejaskrawione kolory, gradienty i ozdobniki imitujace "premium"
+- statusy ukryte tylko w ikonach bez tekstu
+- ciagle przepisywanie calego DOM przy kazdej delcie danych
+
+DOCELOWY KSZTALT INTERFEJSU
+---------------------------
+
+Widok 1 - Status:
+- 4 karty zdrowia urzadzenia
+- stan Wi-Fi, radio, ruch, mesh
+- szybkie akcje: odswiez, sync time, przejdz do wiadomosci, przejdz do ustawien
+
+Widok 2 - Wiadomosci:
+- lekkie listy kanalow/kontaktow
+- czytelny czat
+- prosty feedback wysylki
+
+Widok 3 - Konfiguracja:
+- podstawowe ustawienia na gorze
+- zaawansowane sekcje schowane
+- bezpieczne zapisywanie i jasny status zapisu
+
+Widok 4 - Narzedzia zaawansowane:
+- diagnostyka
+- export/import
+- reboot
+- ewentualna mapa i remote admin
+
+KRYTERIA AKCEPTACJI KONCOWEJ
+----------------------------
+
+Interfejs mozna uznac za gotowy dopiero, gdy:
+- uruchamia sie szybko i przewidywalnie na telefonie oraz desktopie
+- jest czytelny bez zoomowania
+- dziala sensownie przy slabym Wi-Fi
+- nie zalezy od zewnetrznych CDN do podstawowej obslugi
+- nie pobiera niepotrzebnie duzej ilosci danych
+- nie wymaga frameworka frontendowego
+- ma spokojny, czysty, premium wyglad bez przesady
+- wszystkie operacje krytyczne maja jasny feedback i sensowne zabezpieczenia
+
+PODSUMOWANIE DECYZJI PROJEKTOWEJ
+--------------------------------
+
+Najlepszy kierunek dla ESP32 nie polega na dodawaniu kolejnych funkcji wizualnych.
+Najlepszy kierunek to:
+- mniejszy shell
+- mniej JS na starcie
+- mniej requestow
+- lepszy status lacznosci
+- prostsza architektura ekranow
+- lepsza hierarchia ustawien
+- mapa i narzedzia ciezkie tylko na zadanie
+- premium przez dyscypline wizualna, nie przez efekty
+
+Jesli jakis pomysl UI nie daje sie obronic jednoczesnie pod wzgledem:
+- czytelnosci
+- kosztu CPU/RAM
+- kosztu transferu
+- odpornosci na bledy Wi-Fi
+- prostoty firmware
+
+to taki pomysl nalezy uproscic albo odrzucic.
